@@ -8,7 +8,7 @@ import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 import numpy as np
 from numpy.lib.stride_tricks import as_strided as ast
-
+from time import gmtime, strftime
 from torch.utils.data import Dataset,DataLoader
 import torch.utils.data as Data
 import torchvision
@@ -133,7 +133,7 @@ def get_train_test_data(target_subject, number_of_subjects=8):
                 data = sliding_window(data, ws=(WINDOW_SIZE, data.shape[1]), ss=(38, 1))  # 171 corresponds to 5.12 secs, 171 - 38 -> %78 overlap
                 label = sliding_window(label, ws=WINDOW_SIZE, ss=38)  # 171 corresponds to 5.12 secs, 171 - 38 -> %78 overlap
                 # take the most frequent activity within a window for labeling
-                label = mode(label, axis=1)[0]  # axis=1 is for the window axis
+                label = np.squeeze(mode(label, axis=1)[0])  # axis=1 is for the window axis
                 one_hot_labels = np.zeros((len(label), ACTIVITY_NUM))
                 one_hot_labels[np.arange(len(label)), label] = 1
 
@@ -151,15 +151,28 @@ def get_train_test_data(target_subject, number_of_subjects=8):
         print('pamap2 test y shape ->', test_y.shape)
         return train_X, train_y, test_X, test_y
 
-base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
-pamap2_dir = 'PAMAP2_Dataset/PAMAP2_Dataset/Processed/'
+machine = 'windows'
+if machine == 'linux':
+    base_dir = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR/'
+else:
+    base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
 
+pamap2_dir = 'PAMAP2_Dataset/PAMAP2_Dataset/Processed/'
+target_subject = 1
 os.environ['CUDA_VISIBLE_DEVICES']='1'
 
 parser = argparse.ArgumentParser(description='PyTorch Har Training')
 parser.add_argument('--resume', '-r', action='store_true',
                     help='resume from checkpoint')
 args = parser.parse_args()
+
+timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime()) + "_%s" % str(
+            target_subject)
+logdir = os.path.join('./logs', 'pamap2_danhar', timestring)
+if not os.path.exists(logdir):
+    os.makedirs(logdir)
+
+result_csv = logdir + '/danhar_results.csv'
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 print("device: ", device)
@@ -168,7 +181,7 @@ start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
 # Data
 print('==> Preparing data..')
-target_subject = 1
+
 
 train_x, train_y, test_x, test_y = get_train_test_data(target_subject, number_of_subjects=8)
 # train_x = np.load('/home/gaowenbing/desktop/dd/Torch_Har_cbam/HAR_Dataset/pamap2_/train_x.npy')
@@ -199,6 +212,8 @@ trainloader = Data.DataLoader(dataset=trainset, batch_size=300, shuffle=True, nu
 
 testset = Data.TensorDataset(test_x, test_y)
 testloader = Data.DataLoader(dataset=testset, batch_size=300, shuffle=True, num_workers=0)
+
+test_results = []
 
 class ChannelAttention(nn.Module):
     def __init__(self, in_planes, ratio=16):
@@ -251,7 +266,6 @@ def plot_confusion(comfusion,class_data):
     # iters = [[i,j] for i in range(len(classes)) for j in range((classes))]
     # ij配对，遍历矩阵迭代器
     print("len classes: ", len(classes))
-    print("aha: ", np.array([[i, j] for j in range(len(classes))] for i in range(len(classes))).shape)
     iters = np.reshape([[[i, j] for j in range(len(classes))] for i in range(len(classes))], (comfusion.size, 2))
     for i, j in iters:
         plt.text(j, i, format(comfusion[i, j]),verticalalignment="center",horizontalalignment="center")  # 显示对应的数字
@@ -394,9 +408,8 @@ def train(epoch):
     total = 0
     total=total
     for batch_idx, (inputs, targets) in enumerate(trainloader):
-        print("batch idx: ", batch_idx)
-        if batch_idx == 1:
-            break
+        if batch_idx % 1 == 0:
+            print(f"Batch {batch_idx} is started!")
         inputs, targets = inputs.to(device), targets.to(device)
         optimizer.zero_grad()
         inputs=inputs.type(torch.FloatTensor)
@@ -418,6 +431,8 @@ def train(epoch):
         # print(type(predicted),type(targets),predicted,targets,'type(predicted),type(targets)')
         # correct += predicted.eq(targets).sum().item()
         train_error = 1 - taccuracy.item()
+        if batch_idx == 0:
+            break
     return train_loss
 
 def test(epoch):
@@ -426,6 +441,9 @@ def test(epoch):
     test_loss = 0
     correct = 0
     total = 0
+    avg_acc = 0
+    all_ground_truth = []
+    all_predictions = []
     with torch.no_grad():
         for batch_idx, (inputs, targets) in enumerate(testloader):
             inputs, targets = inputs.to(device), targets.to(device)
@@ -440,12 +458,15 @@ def test(epoch):
             _, predicted = outputs.max(1)
             total += targets.size(0)
             # predicted = torch.max(predicted, 1)[1].cuda()
-            targets = torch.max(targets, 1)[1].cuda()
+            targets = torch.max(targets, 1)[1].cuda()  # [1] for taking arg_max
             taccuracy = (torch.sum(predicted == targets.long()).type(torch.FloatTensor) / targets.size(0)).cuda()
+            avg_acc += taccuracy.item()
+            all_ground_truth = all_ground_truth + targets.view(-1).tolist()
+            all_predictions =  all_predictions + predicted.view(-1).tolist()
             # print(type(predicted),type(targets),predicted,targets,'type(predicted),type(targets)')
             # correct += predicted.eq(targets).sum().item()
             test_error=1-taccuracy.item()
-            print('test:', taccuracy.item(), '||', test_error)
+            # print('test:', taccuracy.item(), '||', test_error)
             epoch_list.append(epoch)
             # print(epoch_list)
             # accuracy_list.append(taccuracy.item())
@@ -458,13 +479,23 @@ def test(epoch):
             # print(error_list)
             # np.save('/home/gaowenbing/desktop/dd/Torch_Har_cbam/store_visual/pamap2/epoch_resnet_att_1.npy',epoch_list)
             # np.save('/home/gaowenbing/desktop/dd/Torch_Har_cbam/store_visual/pamap2/error_resnet_att_1.npy',error_list)
+            if batch_idx == 3:
+                break
+    avg_acc /= len(testloader)
+    f1 = f1_score(all_ground_truth, all_predictions, average='macro')
+    print(f"avg acc: {avg_acc}")
+    print(f"f1 score: {f1}")
+
+    test_results.append([avg_acc, f1, epoch])
+    result_np = np.array(test_results, dtype=float)
+    np.savetxt(result_csv, result_np, fmt='%.4f', delimiter=',')
     return test_loss
 
 for epoch in range(start_epoch, start_epoch+500):
     train_loss = train(epoch)
-    print(f"Epoch : {epoch}  Train loss: {train_loss}")
+    print(f"Train loss: {train_loss}")
     test_loss = test(epoch)
-    print(f"Epoch : {epoch}  Test loss: {test_loss}")
+    print(f"Test loss: {test_loss}")
 
 model=resnet()
 stat(model,(1,171,40))

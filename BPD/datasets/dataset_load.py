@@ -7,7 +7,11 @@ import pickle
 import os
 
 # base_dir = '../data/'
-base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
+machine = 'linux'
+if machine == 'linux':
+    base_dir = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR/'
+else:
+    base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
 pamap2_dir = 'PAMAP2_Dataset/PAMAP2_Dataset/Processed/'
 dsads_dir = 'DSADS_Dataset/Processed/'
 gotov_dir = 'GOTOV_Dataset/Processed/'
