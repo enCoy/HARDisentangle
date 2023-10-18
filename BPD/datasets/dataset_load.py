@@ -7,7 +7,7 @@ import pickle
 import os
 
 # base_dir = '../data/'
-machine = 'linux'
+machine = 'other'
 if machine == 'linux':
     base_dir = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR/'
 else:
@@ -63,6 +63,7 @@ GOTOV_DATA_FILE_Test = ['GOTOV30', 'GOTOV31', 'GOTOV32', 'GOTOV33', 'GOTOV34', '
 def load_pamap2(candidate_number):
     global target_train_label, target_train, target_test, target_test_label
     target_user = candidate_number
+
     candidate_list = PAMAP2_DATA_FILES
 
     train_X = np.empty((0, 52))
@@ -87,6 +88,75 @@ def load_pamap2(candidate_number):
     print('pamap2 train y shape ->', train_y.shape)
     print('pamap2 test X shape ->', test_X.shape)
     print('pamap2 test y shape ->', test_y.shape)
+
+    return train_X, train_y, train_d, test_X, test_y, test_d
+
+def get_activity_columns(data_of_interest = ['acc', 'gyr']):
+    body_device_locations = ['chest', 'forearm', 'head', 'shin', 'thigh', 'upperarm', 'waist']
+    column_list = []
+    for device_loc in body_device_locations:
+        for data_name in data_of_interest:
+            column_list.append(device_loc + '_' + data_name + '_x')
+            column_list.append(device_loc + '_' + data_name + '_y')
+            column_list.append(device_loc + '_' + data_name + '_z')
+    return column_list
+
+def load_real(candidate_number):
+    import pandas as pd
+    global target_train_label, target_train, target_test, target_test_label
+    target_user = candidate_number
+    number_of_subjects = 15
+    har_data_dir = 'realworld2016_dataset/Processed/'
+
+    train_X = np.empty((0, 42))
+    train_d = np.empty((0))
+    train_y = np.empty((0))
+
+    for i in range(number_of_subjects):
+
+        if i + 1 == 4 or i + 1 == 7:  # these subjects have multiple sessions of climbing up and down:
+            activity_names = ['climbingdown_1', 'climbingdown_2', 'climbingdown_3',
+                              'climbingup_1', 'climbingup_2', 'climbingup_3',
+                              'jumping', 'lying', 'running', 'sitting', 'standing', 'walking']
+        else:
+            activity_names = ['climbingdown', 'climbingup', 'jumping', 'lying', 'running', 'sitting', 'standing',
+                              'walking']
+
+        data = None
+        label = None
+        for activity_name in activity_names:
+            data_dir = os.path.join(base_dir + har_data_dir + f'subject{i + 1}', activity_name + '.csv')
+            if os.path.exists(data_dir):
+                activity_df = pd.read_csv(data_dir)
+                columns = get_activity_columns(['acc', 'gyr'])
+                data_i = activity_df[columns].values
+                label_i = activity_df['activity_id'].values.astype(int)
+
+                if data is None:
+                    data = data_i
+                    label = label_i
+                else:  # concatenate raw files
+                    data = np.concatenate((data, data_i), axis=0)
+                    label = np.concatenate((label, label_i), axis=0)
+            else:
+                print("Not existing data: ", data_dir)
+                print("Data does not exist... Continuing")
+                continue
+
+        if (i + 1) == target_user:
+            test_X = data
+            test_y = label
+            test_d = np.ones(test_y.shape) * i
+        else:
+            train_X = np.vstack((train_X, data))
+            train_y = np.concatenate((train_y, label))
+            train_d = np.concatenate((train_d, np.ones(train_y.shape) * i))
+
+    print('real test user ->', target_user)
+    print('real train X shape ->', train_X.shape)
+    print('real train y shape ->', train_y.shape)
+    print('real test X shape ->', test_X.shape)
+    print('real test y shape ->', test_y.shape)
 
     return train_X, train_y, train_d, test_X, test_y, test_d
 
@@ -186,7 +256,7 @@ def load_gotov(candidate_number, position):
 
 
 class Dataset(data.Dataset):
-    def __init__(self, data, label, domain, win_len=168, step_len=32, dim=None):
+    def __init__(self, data, label, domain, win_len=50, step_len=32, dim=None):
         self.data = data
         self.label = label
         self.domain = domain  # basically subject num array
@@ -212,7 +282,7 @@ class Dataset(data.Dataset):
 
 
 class DataLoader():
-    def initialize(self, data, label, domain, batch_size=64, win_len=168, step_len=32, dim=None):
+    def initialize(self, data, label, domain, batch_size=64, win_len=50, step_len=32, dim=None):
         dataset = Dataset(data, label, domain, win_len, step_len, dim)
 
         self.data_loader = torch.utils.data.DataLoader(
@@ -228,6 +298,8 @@ class DataLoader():
 def dataset_read(dataset, batch_size, dim, candidate, position=None):
     if dataset == 'pamap2':
         tr_X, tr_y, tr_d, te_X, te_y, te_d = load_pamap2(candidate)
+    elif dataset == 'real':
+        tr_X, tr_y, tr_d, te_X, te_y, te_d = load_real(candidate)
     elif dataset == 'mhealth':
         tr_X, tr_y, tr_d, te_X, te_y, te_d = load_mhealth(candidate)
     elif dataset == 'dsads':

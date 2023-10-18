@@ -62,35 +62,40 @@ def process_data(data_dir, subject_id, device_locations, sensors):
     for activity in activities:
         print("Subject: ", subject)
         print("Activity: ", activity)
-        activity_df = pd.DataFrame()
+        if subject_id == 2 and activity=='climbingup':  # no forearm sensor, drop this activity
+            continue
 
-        time_array, baseline_time = get_synchronization_time_array(data_directory, activity, sensors, device_locations)
-        for sensor in sensors:  # [acc, gyro]
-            print("Sensor:", sensor)
-            activity_zip = ZipFile(os.path.join(data_directory, f'{sensor}_{activity}_csv.zip'))
-            for location in device_locations:
-                print("Location: ", location)
-                if sensor == 'gyr':
-                    df = pd.read_csv(activity_zip.open( f'Gyroscope_{activity}_{location}.csv'))
-                else:
-                    df = pd.read_csv(activity_zip.open( f'{sensor}_{activity}_{location}.csv'))
+        elif subject_id == 6 and activity=='jumping':  # no thigh sensor, drop this activity
+            continue
+        else:  # no worries
+            activity_df = pd.DataFrame()
+            time_array, baseline_time = get_synchronization_time_array(data_directory, activity, sensors, device_locations)
+            for sensor in sensors:  # [acc, gyro]
+                print("Sensor:", sensor)
+                activity_zip = ZipFile(os.path.join(data_directory, f'{sensor}_{activity}_csv.zip'))
+                for location in device_locations:
+                    print("Location: ", location)
+                    if sensor == 'gyr':
+                        df = pd.read_csv(activity_zip.open( f'Gyroscope_{activity}_{location}.csv'))
+                    else:
+                        df = pd.read_csv(activity_zip.open( f'{sensor}_{activity}_{location}.csv'))
 
 
-                time_indices = get_nn_indices_based_on_time(time_array, df[['attr_time']].values)
-                data_to_concat = df[['attr_time', 'attr_x', 'attr_y', 'attr_z']].values
-                activity_df[[f'{location}_{sensor}_t',
-                            f'{location}_{sensor}_x',
-                            f'{location}_{sensor}_y',
-                            f'{location}_{sensor}_z']] = data_to_concat[time_indices]
-                # subtract baseline time
-                activity_df[f'{location}_{sensor}_t'] = activity_df[f'{location}_{sensor}_t'] - baseline_time
-                activity_df['activity_id'] = np.ones(len(time_indices)) * activity_name_to_class[activity]
-            print()
-        output_dir = os.path.join(data_dir, 'Processed', f'subject{subject_id}')
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        activity_df.to_csv(os.path.join(output_dir, f'{activity}.csv'), float_format='%.10f')
-    # now concatenate all activity dataframes
+                    time_indices = get_nn_indices_based_on_time(time_array, df[['attr_time']].values)
+                    data_to_concat = df[['attr_time', 'attr_x', 'attr_y', 'attr_z']].values
+                    activity_df[[f'{location}_{sensor}_t',
+                                f'{location}_{sensor}_x',
+                                f'{location}_{sensor}_y',
+                                f'{location}_{sensor}_z']] = data_to_concat[time_indices]
+                    # subtract baseline time
+                    activity_df[f'{location}_{sensor}_t'] = activity_df[f'{location}_{sensor}_t'] - baseline_time
+                    activity_df['activity_id'] = np.ones(len(time_indices)) * activity_name_to_class[activity]
+                print()
+            output_dir = os.path.join(data_dir, 'Processed', f'subject{subject_id}')
+            if not os.path.exists(output_dir):
+                os.makedirs(output_dir)
+            activity_df.to_csv(os.path.join(output_dir, f'{activity}.csv'), float_format='%.10f')
+        # now concatenate all activity dataframes
 
 
 if __name__ == "__main__":
@@ -98,7 +103,7 @@ if __name__ == "__main__":
     output_dir = os.path.join(dataset_dir, 'Processed')
 
 
-    subject = 14
+    subject = 6
 
     if (((subject == 4) or (subject == 7)) or subject==14):
         activity_name_to_class = {

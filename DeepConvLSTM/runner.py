@@ -1,4 +1,6 @@
 import os
+
+import pandas as pd
 import torch
 from time import gmtime, strftime
 import numpy as np
@@ -8,33 +10,82 @@ from scipy.stats import mode
 import torch.utils.data as Data
 import torch.nn as nn
 import sklearn.metrics as metrics
-
+from os import listdir
+import warnings
+warnings.filterwarnings('ignore')
 
 from DeepConvLSTMModel import HARModel, init_weights
 
 # window should be 500 ms.. We are going to use 33.3 hz
 
+def find_csv_filenames( path_to_dir, suffix=".csv" ):
+    filenames = listdir(path_to_dir)
+    return [filename for filename in filenames if filename.endswith( suffix )]
+
+def get_activity_columns(data_of_interest = ['acc', 'gyr']):
+    body_device_locations = ['chest', 'forearm', 'head', 'shin', 'thigh', 'upperarm', 'waist']
+    column_list = []
+    for device_loc in body_device_locations:
+        for data_name in data_of_interest:
+            column_list.append(device_loc + '_' + data_name + '_x')
+            column_list.append(device_loc + '_' + data_name + '_y')
+            column_list.append(device_loc + '_' + data_name + '_z')
+    return column_list
 
 
-def get_train_test_data(target_subject, number_of_subjects=8):
-    train_X = np.empty((0, WINDOW_SIZE, 52))
+def get_train_test_data(target_subject, number_of_subjects=8, dataset_of_interest='pamap2'):
+    train_X = np.empty((0, WINDOW_SIZE, num_modalities))
     train_y = np.empty((0, ACTIVITY_NUM))
-    test_X = np.empty((0, WINDOW_SIZE, 52))
+    test_X = np.empty((0, WINDOW_SIZE, num_modalities))
     test_y = np.empty((0, ACTIVITY_NUM))
     for i in range(number_of_subjects):
-        with open(os.path.join(base_dir + pamap2_dir + f'subject10{i + 1}' + '.pickle'), 'rb') as handle:
-            whole_data = pickle.load(handle)
-            data = whole_data['data']
-            label = whole_data['label']
-            data = sliding_window(data, ws=(WINDOW_SIZE, data.shape[1]),
-                                  ss=(38, 1))  # 171 corresponds to 5.12 secs, 171 - 38 -> %78 overlap
-            label = sliding_window(label, ws=WINDOW_SIZE,
-                                   ss=38)  # 171 corresponds to 5.12 secs, 171 - 38 -> %78 overlap
-            # take the most frequent activity within a window for labeling
-            label = np.squeeze(mode(label, axis=1)[0])  # axis=1 is for the window axis
-            one_hot_labels = np.zeros((len(label), ACTIVITY_NUM))
-            one_hot_labels[np.arange(len(label)), label] = 1
+        if dataset_of_interest == 'pamap2':
+            with open(os.path.join(base_dir + har_data_dir + f'subject10{i + 1}' + '.pickle'), 'rb') as handle:
+                whole_data = pickle.load(handle)
+                data = whole_data['data']
+                label = whole_data['label']
+                data = sliding_window(data, ws=(WINDOW_SIZE, data.shape[1]),
+                                      ss=(25, 1))  # 50 corresponds to 1 secs,
+                label = sliding_window(label, ws=WINDOW_SIZE,
+                                       ss=25)
 
+                # take the most frequent activity within a window for labeling
+                label = np.squeeze(mode(label, axis=1)[0])  # axis=1 is for the window axis
+                one_hot_labels = np.zeros((len(label), ACTIVITY_NUM))
+                one_hot_labels[np.arange(len(label)), label] = 1
+        else:  # realworld
+            if i+1 == 4 or i+1 == 7:  # these subjects have multiple sessions of climbing up and down:
+                activity_names =  ['climbingdown_1', 'climbingdown_2', 'climbingdown_3',
+                                   'climbingup_1', 'climbingup_2', 'climbingup_3',
+                                   'jumping', 'lying', 'running', 'sitting', 'standing', 'walking']
+            else:
+                activity_names =  ['climbingdown', 'climbingup', 'jumping', 'lying', 'running', 'sitting', 'standing', 'walking']
+            data = None
+            one_hot_labels = None
+            for activity_name in activity_names:
+                data_dir = os.path.join(base_dir + har_data_dir + f'subject{i+1}', activity_name + '.csv')
+                if os.path.exists(data_dir):
+                    activity_df = pd.read_csv(data_dir)
+                    columns = get_activity_columns(['acc', 'gyr'])
+                    data_i = activity_df[columns].values
+                    label_i = activity_df['activity_id'].values.astype(int)
+                    data_i = sliding_window(data_i, ws=(WINDOW_SIZE, data_i.shape[1]),
+                                          ss=(25, 1))  # 50 corresponds to 1 secs, 50 - 11 -> %50 overlap
+                    label_i = sliding_window(label_i, ws=WINDOW_SIZE,
+                                          ss=25)  # 50 corresponds to 1 secs, 50 - 11 -> %50 overlap
+                    label_i = np.squeeze(mode(label_i, axis=1)[0])  # axis=1 is for the window axis
+                    one_hot_labels_i = np.zeros((len(label_i), ACTIVITY_NUM))
+                    one_hot_labels_i[np.arange(len(label_i)), label_i] = 1
+                    if data is None:
+                        data = data_i
+                        one_hot_labels = one_hot_labels_i
+                    else: # concatenate raw files
+                        data = np.concatenate((data, data_i), axis=0)
+                        one_hot_labels = np.concatenate((one_hot_labels, one_hot_labels_i), axis=0)
+                else:
+                    print("Not existing data: ", data_dir)
+                    print("Data does not exist... Continuing")
+                    continue
         if (i + 1) == target_subject:
             test_X = data
             test_y = one_hot_labels
@@ -42,11 +93,11 @@ def get_train_test_data(target_subject, number_of_subjects=8):
             train_X = np.vstack((train_X, data))
             train_y = np.concatenate((train_y, one_hot_labels))
 
-    print('pamap2 test user ->', target_subject)
-    print('pamap2 train X shape ->', train_X.shape)
-    print('pamap2 train y shape ->', train_y.shape)
-    print('pamap2 test X shape ->', test_X.shape)
-    print('pamap2 test y shape ->', test_y.shape)
+    print(f'{dataset_of_interest} test user ->', target_subject)
+    print(f'{dataset_of_interest} train X shape ->', train_X.shape)
+    print(f'{dataset_of_interest} train y shape ->', train_y.shape)
+    print(f'{dataset_of_interest} test X shape ->', test_X.shape)
+    print(f'{dataset_of_interest} test y shape ->', test_y.shape)
     return train_X, train_y, test_X, test_y
 
 def sliding_window(a, ws, ss=None, flatten=True):
@@ -212,12 +263,19 @@ if __name__ == "__main__":
     else:
         base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
 
-    pamap2_dir = 'PAMAP2_Dataset/PAMAP2_Dataset/Processed50Hz/'
+    har_data_name = 'real'  # 'real' or 'pamap2'
+    if har_data_name == 'pamap2':
+        har_data_dir = 'PAMAP2_Dataset/PAMAP2_Dataset/Processed50Hz/'
+        num_modalities = 52  # number of sensor channels
+        ACTIVITY_NUM = 12  # pamap2
+    elif har_data_name == 'real':
+        har_data_dir = 'realworld2016_dataset/Processed/'
+        num_modalities = 42  # number of sensor channels
+        ACTIVITY_NUM = 8
+
     target_subject = 1
 
-    num_modalities = 52  # number of sensor channels
     WINDOW_SIZE = 50  # 1 sec with 50 Hz
-    ACTIVITY_NUM = 12  # pamap2
     test_results = []
 
     timestring = strftime("%Y-%m-%d_%H-%M-%S", gmtime()) + "_%s" % str(
@@ -236,7 +294,8 @@ if __name__ == "__main__":
     # Data
     print('==> Preparing data..')
 
-    train_x, train_y, test_x, test_y = get_train_test_data(target_subject, number_of_subjects=8)
+    train_x, train_y, test_x, test_y = get_train_test_data(target_subject, number_of_subjects=8,
+                                                           dataset_of_interest=har_data_name)
     # train_x = np.load('/home/gaowenbing/desktop/dd/Torch_Har_cbam/HAR_Dataset/pamap2_/train_x.npy')
     shape = train_x.shape
     train_x = torch.from_numpy(np.reshape(train_x.astype(float), [shape[0], 1, shape[1], shape[2]]))
@@ -270,7 +329,7 @@ if __name__ == "__main__":
 
     net = HARModel(num_sensor_channels=num_modalities,
                    window_length=WINDOW_SIZE,
-                   n_classes=12)
+                   n_classes=ACTIVITY_NUM)
     net.apply(init_weights)
 
     ## check if GPU is available

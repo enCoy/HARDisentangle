@@ -100,7 +100,7 @@ def clean_pamap2_data(data):
 if __name__ == "__main__":
     project_dir = r"C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR"
     dataset_dir = os.path.join(project_dir, 'PAMAP2_Dataset\PAMAP2_Dataset\Protocol')
-    outpur_dir = os.path.join(project_dir, 'PAMAP2_Dataset\PAMAP2_Dataset\ProcessedDownsampledBy3')
+    outpur_dir = os.path.join(project_dir, 'PAMAP2_Dataset\PAMAP2_Dataset\Processed50Hz')
     subject_ids_to_process = [1, 2, 3, 4, 5, 6, 7, 8]
 
     for subject_id in subject_ids_to_process:
@@ -125,8 +125,8 @@ if __name__ == "__main__":
         data = processed_data.drop(['timestamp', 'activityID'], axis=1).values
         print("data shape: ", data.shape)
         print("label shape: ", new_labels.shape)
-        downsampled_data = decimate(data, q=3, axis=0)  # 100 hz to 33.3 hz
-        downsampled_label = new_labels[::3]
+        downsampled_data = decimate(data, q=2, axis=0)  # 100 hz to 50 hz
+        downsampled_label = new_labels[::2]
         print("downsampled data shape: ", downsampled_data.shape)
         print("downsampled label shape: ", downsampled_label.shape)
 
