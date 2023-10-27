@@ -61,7 +61,6 @@ def label_correcter():
 
 def get_pamap2_column_names():
     colNames = ["timestamp", "activityID", "heartrate"]
-
     IMUhand = ['handTemperature',
                'handAcc16_1', 'handAcc16_2', 'handAcc16_3',
                'handAcc6_1', 'handAcc6_2', 'handAcc6_3',

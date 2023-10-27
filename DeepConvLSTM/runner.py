@@ -273,7 +273,7 @@ if __name__ == "__main__":
         num_modalities = 42  # number of sensor channels
         ACTIVITY_NUM = 8
 
-    target_subject = 1
+    target_subject = 6
 
     WINDOW_SIZE = 50  # 1 sec with 50 Hz
     test_results = []
@@ -296,6 +296,11 @@ if __name__ == "__main__":
 
     train_x, train_y, test_x, test_y = get_train_test_data(target_subject, number_of_subjects=8,
                                                            dataset_of_interest=har_data_name)
+
+    print("Here are the shapes before!")
+    print(train_x.shape, train_y.shape)  # N (number of samples) x WindowLength x Features (or modalities)
+    print(test_x.shape, test_y.shape)
+
     # train_x = np.load('/home/gaowenbing/desktop/dd/Torch_Har_cbam/HAR_Dataset/pamap2_/train_x.npy')
     shape = train_x.shape
     train_x = torch.from_numpy(np.reshape(train_x.astype(float), [shape[0], 1, shape[1], shape[2]]))
@@ -315,8 +320,9 @@ if __name__ == "__main__":
 
     # Data is reshaped    -     basically an image of sensor signals
     # where rows are time steps, columns are modalities
-    train_x = train_x.reshape((-1, WINDOW_SIZE, num_modalities))  # for input to Conv1D
-    test_x = test_x.reshape((-1, WINDOW_SIZE, num_modalities))  # for input to Conv1D
+    # train_x = train_x.reshape((-1, WINDOW_SIZE, num_modalities))  # for input to Conv1D
+    # test_x = test_x.reshape((-1, WINDOW_SIZE, num_modalities))  # for input to Conv1D
+
     trainset = Data.TensorDataset(train_x, train_y)
     trainloader = Data.DataLoader(dataset=trainset, batch_size=100, shuffle=True, num_workers=0, drop_last=True)
 
@@ -324,7 +330,7 @@ if __name__ == "__main__":
     testloader = Data.DataLoader(dataset=testset, batch_size=100, shuffle=True, num_workers=0, drop_last=True)
 
     print("Here are the shapes!")
-    print(train_x.shape, train_y.shape)
+    print(train_x.shape, train_y.shape)  # N (number of samples) x WindowLength x Features (or modalities)
     print(test_x.shape, test_y.shape)
 
     net = HARModel(num_sensor_channels=num_modalities,
