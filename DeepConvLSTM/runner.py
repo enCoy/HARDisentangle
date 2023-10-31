@@ -263,7 +263,7 @@ if __name__ == "__main__":
     else:
         base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
 
-    har_data_name = 'real'  # 'real' or 'pamap2'
+    har_data_name = 'pamap2'  # 'real' or 'pamap2'
     if har_data_name == 'pamap2':
         har_data_dir = 'PAMAP2_Dataset/PAMAP2_Dataset/Processed50Hz/'
         num_modalities = 52  # number of sensor channels

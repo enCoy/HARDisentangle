@@ -118,6 +118,7 @@ class Feature_CNN(nn.Module):
 
     def forward(self, x):
         x = x.unsqueeze(dim=3)  # input size: (batch_size, channel, win， 1)
+        print("x shape: ", x.size())
         x = self.cnn(x)
         x = x.reshape(x.size(0), -1)
         return x

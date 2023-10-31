@@ -32,8 +32,9 @@ class DataProcessor():
 
 
     def generate_positive_samples(self, data_dict, modalities):
-        # will create two arrays - input = time series modality_i window_m
-        # output - positive sample = time series modality_i window_m
+        # will create two arrays -
+        # input = time series modality_i window_m
+        # output - positive sample = time series modality_-i window_m
         # positive samples for modality_i, window_m = window_m modality_-i
         train_X = np.empty((0, self.window_size, self.num_modalities_per_location))
         # total number of samples = ((P-1) x N_windows_per_subject) x M x M-1 ..from P-1 non-target subjects, N windows, M modalities, M-1 other modalities
@@ -50,7 +51,7 @@ class DataProcessor():
                     other_modality_data = data_dict[(subject_idx, other_modality)][0]
                     if subject_idx == self.target_subject_num:
                         test_X = np.vstack((test_X, current_modality_data))
-                        test_y = np.vstack((test_X, other_modality_data))
+                        test_y = np.vstack((test_y, other_modality_data))
                     else:
                         train_X = np.vstack((train_X, current_modality_data))
                         train_y = np.concatenate((train_y, other_modality_data))
@@ -59,6 +60,34 @@ class DataProcessor():
         print(f'Positive samples train y shape ->', train_y.shape)
         print(f'Positive samples test X shape ->', test_X.shape)
         print(f'Positive samples test y shape ->', test_y.shape)
+        return train_X, train_y, test_X, test_y
+
+    def generate_autoregressive_negative_samples(self, data_dict, modalities):
+        # will create two arrays -
+        # input = time series modality_i window_m
+        # output - negative sample = time series modality_i window_m+1
+        train_X = np.empty((0, self.window_size, self.num_modalities_per_location))
+        # total number of samples = ((P-1) x N_windows_per_subject) x M x M-1 ..from P-1 non-target subjects, N windows, M modalities, M-1 other modalities
+        train_y = np.empty((0, self.window_size, self.num_modalities_per_location))
+        test_X = np.empty((0, self.window_size, self.num_modalities_per_location))
+        test_y = np.empty((0, self.window_size, self.num_modalities_per_location))
+
+        for subject_idx in range(1, self.num_subjects + 1):
+            for modality in modalities:
+                # take all the windows of current modality
+                current_modality_data = data_dict[(subject_idx, modality)][0]
+                if subject_idx == self.target_subject_num:
+                    test_X = np.vstack((test_X, current_modality_data[:-1, :, :])) # samples until last time step
+                    test_y = np.vstack((test_y, current_modality_data[1:, :, :]))  # starting from 1
+                    # this ensured that test data is one time step forward shifted version of training data
+                else:
+                    train_X = np.vstack((train_X, current_modality_data[:-1, :, :]))
+                    train_y = np.concatenate((train_y, current_modality_data[1:, :, :]))
+        print("Negative samples are generated!")
+        print(f'Negative samples train X shape ->', train_X.shape)
+        print(f'Negative samples train y shape ->', train_y.shape)
+        print(f'Negative samples test X shape ->', test_X.shape)
+        print(f'Negative samples test y shape ->', test_y.shape)
         return train_X, train_y, test_X, test_y
 
 
