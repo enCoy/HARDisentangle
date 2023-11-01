@@ -78,7 +78,7 @@ if __name__ == "__main__":
 
     trainset = Data.TensorDataset(train_X, train_y)
     trainloader = Data.DataLoader(dataset=trainset, batch_size=parameters_dict['batch_size'],
-                                  shuffle=False, num_workers=0, drop_last=True)
+                                  shuffle=True, num_workers=0, drop_last=True)
     testset = Data.TensorDataset(test_X, test_y)
     testloader = Data.DataLoader(dataset=testset, batch_size=parameters_dict['batch_size'],
                                  shuffle=False, num_workers=0, drop_last=True)

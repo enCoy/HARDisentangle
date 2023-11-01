@@ -116,6 +116,33 @@ class DataProcessor():
         print(f'Samples test y shape ->', test_y.shape)
         return train_X, train_y, test_X, test_y
 
+    def get_modality_separated_train_test_classification_data(self, data_dict, modalities):
+        # will create two arrays -
+        # input = time series modality_i window_m
+        # output = input since this will be used for reconstruction
+        train_X = np.empty((0, self.window_size, self.num_modalities_per_location))
+        # total number of samples = ((P-1) x N_windows_per_subject) x M x M-1 ..from P-1 non-target subjects, N windows, M modalities, M-1 other modalities
+        train_y = np.empty((0, self.num_activities))
+        test_X = np.empty((0, self.window_size, self.num_modalities_per_location))
+        test_y = np.empty((0, self.num_activities))
+
+        for subject_idx in range(1, self.num_subjects + 1):
+            for modality in modalities:
+                current_modality_data = data_dict[(subject_idx, modality)][0]
+                current_modality_labels = data_dict[(subject_idx, modality)][1]
+                if subject_idx == self.target_subject_num:
+                    test_X = np.vstack((test_X, current_modality_data))
+                    test_y = np.vstack((test_y, current_modality_labels))
+                else:
+                    train_X = np.vstack((train_X, current_modality_data))
+                    train_y = np.concatenate((train_y, current_modality_labels))
+        print("Samples are generated!")
+        print(f'Samples train X shape ->', train_X.shape)
+        print(f'Samples train y shape ->', train_y.shape)
+        print(f'Samples test X shape ->', test_X.shape)
+        print(f'Samples test y shape ->', test_y.shape)
+        return train_X, train_y, test_X, test_y
+
     def prepare_data_dict(self):
         # keys will be (subject_id, modality name) values will be (data=all windows, labels=activities)
         data_dict = {}
