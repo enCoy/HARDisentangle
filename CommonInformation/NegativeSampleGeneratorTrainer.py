@@ -44,15 +44,19 @@ if __name__ == "__main__":
     else:
         input_size = 6
 
+    torch.manual_seed(parameters_dict['generator_init_seed'])  # required to initialize positive and negative sample generators the same for shared space
     model = LSTM_AE(input_size, parameters_dict['embedding_dim'],
                     use_bidirectional=parameters_dict['use_bidirectional'],
                     num_layers=parameters_dict['num_lstm_layers'])
+    for param in model.parameters():
+        print(param.data)
+
     model, best_epoch, [train_losses, test_losses] = train(model, trainloader, testloader, parameters_dict)
 
     timestring = strftime("%Y-%m-%d_%H-%M-%S", localtime()) + "_Subject%s" % str(
         target_subject)
 
-    save_dir = os.path.join(BASE_DIR, 'CommonInformation', 'NegativeSampleGenerator', data_name, timestring)
+    save_dir = os.path.join(BASE_DIR, 'CommonInformation', 'TmpNegativeSampleGenerator', data_name, timestring)
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 

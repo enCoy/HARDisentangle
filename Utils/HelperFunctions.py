@@ -24,9 +24,27 @@ def convert_to_torch(train_X, train_y, test_X, test_y):
     print("Test y shape: ", test_y.size())
     return train_X, train_y, test_X, test_y
 
-def plot_loss_curves(train_loss, test_loss, save_loc=None, show_fig=True):
+def plot_loss_curves(train_loss, test_loss, save_loc=None, show_fig=True, title='Loss Curve'):
     epochs = np.arange(len(train_loss)) + 1
-    plot_single_continuous_plot(epochs, train_loss, 'Loss curve', 'Epoch', 'Loss', color='tab:red', label='train')
-    plot_single_continuous_plot(epochs, test_loss, 'Loss curve', 'Epoch', 'Loss', color='navy',
+    plot_single_continuous_plot(epochs, train_loss, title, 'Epoch', 'Loss', color='tab:red', label='train')
+    plot_single_continuous_plot(epochs, test_loss, title, 'Epoch', 'Loss', color='navy',
                                 show_enable=show_fig, hold_on=True, legend_enable=True, label='test',
-                                save_path=os.path.join(save_loc, f"LossCurve.png"))
+                                save_path=os.path.join(save_loc, f"{title}.png"))
+
+
+def contrastive_loss_criterion(x1, x2, label, margin: float = 1.0):
+    """
+    Computes Contrastive Loss
+    """
+    # label = 1 means positive samples, 0 negative samples
+    dist = torch.nn.functional.pairwise_distance(x1, x2)
+
+    loss = (1 - label) * torch.pow(dist, 2) + (label) * torch.pow(torch.clamp(margin - dist, min=0.0), 2)
+    loss = torch.mean(loss)
+
+    return loss
+
+def mi_estimator(mine, x, z, z_marg):
+    # x is z_signal, y is z_redundant  y_ is also redundant
+    joint, marginal = mine(x, z), mine(x, z_marg)
+    return torch.mean(joint) - torch.log(torch.mean(torch.exp(marginal)))

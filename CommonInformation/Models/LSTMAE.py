@@ -6,9 +6,7 @@ from sklearn.metrics import mean_squared_error
 class Encoder(nn.Module):
 
     def __init__(self, input_size, embedding_size, use_bidirectional=False, num_layers=1):
-
         super().__init__()
-
         self.input_size = input_size  # number of expected modalities
         self.embedding_size = embedding_size  # bottleneck dimension
         self.use_bidirectional = use_bidirectional
@@ -17,7 +15,6 @@ class Encoder(nn.Module):
             self.output_multiplication = 2
         else:
             self.output_multiplication = 1
-
 
         # first map from input_size dim to 2*embedding_size dim
         self.LSTM1 = nn.LSTM(
