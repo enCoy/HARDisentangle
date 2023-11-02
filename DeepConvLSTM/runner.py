@@ -195,7 +195,6 @@ def train(net, train_loader, test_loader, epochs=10, batch_size=100, lr=0.001):
         net.cuda()
 
     for e in range(epochs):
-
         # initialize hidden state
         h = net.init_hidden(batch_size)
         train_losses = []

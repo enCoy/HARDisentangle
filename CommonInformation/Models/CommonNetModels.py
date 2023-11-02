@@ -148,6 +148,7 @@ def forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model, 
     # input shape (N x NumWindows x feature_dim)
     positive_representation = positive_r_model(inputs)  # should be shaped (N x embedding_dim)
     negative_representation = negative_r_model(inputs)  # should be shaped (N x embedding_dim)
+    negative_representation = -positive_representation + negative_representation
     # for common representation - positives are positives - negatives are negatives
     # for unique representation - vice versa
     # calculate losses
@@ -155,8 +156,8 @@ def forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model, 
     reconstruction_loss = mse_loss(reconstructed, targets)
     # contrastive
     c_loss_common_p = contrastive_loss(common_representation, positive_representation, label=0)
-    c_loss_common_n = contrastive_loss(common_representation, negative_representation, label=1)
-    c_loss_unique_p = contrastive_loss(unique_representation, positive_representation, label=1)
+    c_loss_common_n = contrastive_loss(common_representation, negative_representation, label=1)  # problematic
+    c_loss_unique_p = contrastive_loss(unique_representation, positive_representation, label=1)  # problematic
     c_loss_unique_n = contrastive_loss(unique_representation, negative_representation, label=0)
     # mutual info
     # this is how several people sample marginal distribution

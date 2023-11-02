@@ -2,9 +2,10 @@ import numpy as np
 import os
 import pickle
 import pandas as pd
-from HelperFunctions import sliding_window, calculate_amount_of_slide, get_activity_columns
+from Utils.HelperFunctions import sliding_window, calculate_amount_of_slide, get_activity_columns
+from Utils.HelperFunctions import standardize_data
 import scipy
-
+from sklearn.preprocessing import StandardScaler
 
 class DataProcessor():
     def __init__(self, data_dir, data_name, target_subject_num, num_subjects, num_activities, window_size, num_modalities,
@@ -20,6 +21,7 @@ class DataProcessor():
         self.sampling_rate = sampling_rate  # in Hz
         self.data_name = data_name  # 'real', 'pamap2'
 
+
         if self.data_name == 'pamap2':
             self.num_modalities_per_location = 9  # two acc (2x3 = 6) + gyro (3)
         elif self.data_name == 'real':
@@ -28,8 +30,7 @@ class DataProcessor():
 
         self.modality_indices, self.modalities = self.get_modality_indices()
         self.data_dict = self.prepare_data_dict()
-
-
+        self.standardizers = self.obtain_standardizers()
 
     def generate_positive_samples(self, data_dict, modalities):
         # will create two arrays -
@@ -49,12 +50,21 @@ class DataProcessor():
                     # take all the windows of current modality
                     current_modality_data = data_dict[(subject_idx, modality)][0]
                     other_modality_data = data_dict[(subject_idx, other_modality)][0]
+
+                    # standardize
+                    current_modality_data, _ = standardize_data(current_modality_data,
+                                                                self.standardizers[(self.target_subject_num, modality)],
+                                                                is_generated=True)
+                    other_modality_data, _ = standardize_data(other_modality_data,
+                                                                self.standardizers[(self.target_subject_num, other_modality)],
+                                                                is_generated=True)
+
                     if subject_idx == self.target_subject_num:
                         test_X = np.vstack((test_X, current_modality_data))
                         test_y = np.vstack((test_y, other_modality_data))
                     else:
                         train_X = np.vstack((train_X, current_modality_data))
-                        train_y = np.concatenate((train_y, other_modality_data))
+                        train_y = np.vstack((train_y, other_modality_data))
         print("Positive samples are generated!")
         print(f'Positive samples train X shape ->', train_X.shape)
         print(f'Positive samples train y shape ->', train_y.shape)
@@ -76,13 +86,17 @@ class DataProcessor():
             for modality in modalities:
                 # take all the windows of current modality
                 current_modality_data = data_dict[(subject_idx, modality)][0]
+                # standardize
+                current_modality_data, _ = standardize_data(current_modality_data,
+                                                            self.standardizers[(self.target_subject_num, modality)],
+                                                                is_generated=True)
                 if subject_idx == self.target_subject_num:
                     test_X = np.vstack((test_X, current_modality_data[:-1, :, :])) # samples until last time step
                     test_y = np.vstack((test_y, current_modality_data[1:, :, :]))  # starting from 1
                     # this ensured that test data is one time step forward shifted version of training data
                 else:
                     train_X = np.vstack((train_X, current_modality_data[:-1, :, :]))
-                    train_y = np.concatenate((train_y, current_modality_data[1:, :, :]))
+                    train_y = np.vstack((train_y, current_modality_data[1:, :, :]))
         print("Negative samples are generated!")
         print(f'Negative samples train X shape ->', train_X.shape)
         print(f'Negative samples train y shape ->', train_y.shape)
@@ -103,12 +117,16 @@ class DataProcessor():
         for subject_idx in range(1, self.num_subjects + 1):
             for modality in modalities:
                 current_modality_data = data_dict[(subject_idx, modality)][0]
+                # standardize
+                current_modality_data, _ = standardize_data(current_modality_data,
+                                                            self.standardizers[(self.target_subject_num, modality)],
+                                                            is_generated=True)
                 if subject_idx == self.target_subject_num:
                     test_X = np.vstack((test_X, current_modality_data))
                     test_y = np.vstack((test_y, current_modality_data))
                 else:
                     train_X = np.vstack((train_X, current_modality_data))
-                    train_y = np.concatenate((train_y, current_modality_data))
+                    train_y = np.vstack((train_y, current_modality_data))
         print("Samples are generated!")
         print(f'Samples train X shape ->', train_X.shape)
         print(f'Samples train y shape ->', train_y.shape)
@@ -119,7 +137,7 @@ class DataProcessor():
     def get_modality_separated_train_test_classification_data(self, data_dict, modalities):
         # will create two arrays -
         # input = time series modality_i window_m
-        # output = input since this will be used for reconstruction
+        # output = activity one hot encoding
         train_X = np.empty((0, self.window_size, self.num_modalities_per_location))
         # total number of samples = ((P-1) x N_windows_per_subject) x M x M-1 ..from P-1 non-target subjects, N windows, M modalities, M-1 other modalities
         train_y = np.empty((0, self.num_activities))
@@ -129,13 +147,17 @@ class DataProcessor():
         for subject_idx in range(1, self.num_subjects + 1):
             for modality in modalities:
                 current_modality_data = data_dict[(subject_idx, modality)][0]
+                # standardize
+                current_modality_data, _ = standardize_data(current_modality_data,
+                                                            self.standardizers[(self.target_subject_num, modality)],
+                                                            is_generated=True)
                 current_modality_labels = data_dict[(subject_idx, modality)][1]
                 if subject_idx == self.target_subject_num:
                     test_X = np.vstack((test_X, current_modality_data))
                     test_y = np.vstack((test_y, current_modality_labels))
                 else:
                     train_X = np.vstack((train_X, current_modality_data))
-                    train_y = np.concatenate((train_y, current_modality_labels))
+                    train_y = np.vstack((train_y, current_modality_labels))
         print("Samples are generated!")
         print(f'Samples train X shape ->', train_X.shape)
         print(f'Samples train y shape ->', train_y.shape)
@@ -156,6 +178,24 @@ class DataProcessor():
                 data_dict[(i+1, modality)] = (data[:, :, self.modality_indices[modality]],
                                                              one_hot_labels)
         return data_dict
+
+    def obtain_standardizers(self):
+        standardizers = {}  # will have keys (subject_excluded, modality)
+        for modality in self.modalities:
+            for i in range(self.num_subjects):
+                all_data_to_calculate_scaler = np.empty((0, self.window_size, self.num_modalities_per_location))
+                # exclude subject i
+                for j in range(self.num_subjects):
+                    if j != i:
+                        modality_data = self.data_dict[(i+1, modality)][0]  # input data of that modality
+                        all_data_to_calculate_scaler = np.vstack((all_data_to_calculate_scaler, modality_data))
+                print("modality all_data_to_calculate_scaler shape: ", all_data_to_calculate_scaler.shape)
+                _, modality_standardizer = standardize_data(all_data_to_calculate_scaler, StandardScaler(), is_generated=False)
+                standardizers[(i+1, modality)] = modality_standardizer
+        return standardizers
+
+
+
 
     def get_modality_indices(self):
         # NOTE: THESE VALUES ARE BASED ON THE PAMAP2 PROCESSING WITH 52 FEATURES

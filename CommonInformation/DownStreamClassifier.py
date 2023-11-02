@@ -3,9 +3,13 @@ from CommonInformation.Models.CommonNetModels import CNNBaseNet, CommonNet
 from CommonInformation.Main import get_parameters
 from CommonInformation.DataProcesses import DataProcessor
 from Utils.HelperFunctions import convert_to_torch
+from time import localtime, strftime
 import torch.utils.data as Data
 import torch
+import sklearn.metrics as metrics
 import numpy as np
+import os
+from CommonInformation.Main import BASE_DIR
 
 if __name__ == "__main__":
 
@@ -16,7 +20,7 @@ if __name__ == "__main__":
         base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
 
     data_name = 'pamap2'  # 'pamap2' or 'real'
-    target_subject = 1
+    target_subject = 3
     parameters_dict = get_parameters(data_name)
 
     if data_name == 'pamap2':
@@ -37,7 +41,6 @@ if __name__ == "__main__":
     # initial idea - look at the score of each modality alone % freeze earlier layers
     train_X, train_y, test_X, test_y = data_processor.get_modality_separated_train_test_classification_data(data_processor.data_dict,
                                                                                         data_processor.modalities)
-    print("train y: ", train_y)
     train_X, train_y, test_X, test_y = convert_to_torch(train_X, train_y, test_X, test_y)
 
     trainset = Data.TensorDataset(train_X, train_y)
@@ -47,8 +50,7 @@ if __name__ == "__main__":
     testloader = Data.DataLoader(dataset=testset, batch_size=parameters_dict['batch_size'],
                                  shuffle=False, num_workers=0, drop_last=True)
 
-
-    model_dir = r"C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR\CommonInformation\FuseNet\pamap2\2023-11-01_11-59-54_Subject1"
+    model_dir = os.path.join(BASE_DIR, r"DisentangledHAR\CommonInformation\FuseNet\pamap2\2023-11-02_00-52-16_Subject3")
     base_net = CNNBaseNet(input_dim=input_size, output_channels=64, embedding=128,
                        num_time_steps=parameters_dict['window_size'])
     common_net = CommonNet(128, 256, parameters_dict['embedding_dim'])
@@ -74,23 +76,51 @@ if __name__ == "__main__":
 
     epoch_losses_train = []
     epoch_losses_test = []
+    test_results = []
+    train_results = []
+    # save configuration
+    timestring = strftime("%Y-%m-%d_%H-%M-%S", localtime()) + "_Subject%s" % str(
+        target_subject)
+    save_dir = os.path.join(BASE_DIR, 'CommonInformation', 'ClassifierNet', data_name, timestring)
+    train_result_csv = os.path.join(save_dir, 'train_classification_results.csv')
+    test_result_csv = os.path.join(save_dir, 'test_classification_results.csv')
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
 
     for epoch in range(parameters_dict['num_epochs']):
         #enable train mode
         for model in all_models:
             model.train()
-        batch_losses = train_one_epoch(trainloader, optimizer, base_net, common_net, classification_net, criterion, mode='train')
+        batch_losses, all_ground_truth_train, all_predictions_train = train_one_epoch(trainloader, optimizer,
+                                                                          base_net, common_net, classification_net, criterion, mode='train')
         # add losses
         epoch_losses_train.append(np.mean(batch_losses))
+        # performance metrics
+        f1_train = metrics.f1_score(all_ground_truth_train, all_predictions_train, average='macro')
+        acc_train = metrics.accuracy_score(all_ground_truth_train, all_predictions_train)
+        train_results.append([acc_train, f1_train, epoch+1])
+        result_np = np.array(train_results, dtype=float)
+        np.savetxt(train_result_csv, result_np, fmt='%.4f', delimiter=',')
 
         # enable test mode
         for model in all_models:
             model.eval()
-        batch_losses = train_one_epoch(trainloader, optimizer, base_net, common_net, classification_net, criterion, mode='test')
+        batch_losses, all_ground_truth_test, all_predictions_test = train_one_epoch(trainloader, optimizer,
+                                                                          base_net, common_net, classification_net, criterion, mode='test')
         # add losses
         epoch_losses_test.append(np.mean(batch_losses))
+        # performance metrics
+        f1_test = metrics.f1_score(all_ground_truth_test, all_predictions_test, average='macro')
+        acc_test = metrics.accuracy_score(all_ground_truth_test, all_predictions_test)
+        test_results.append([acc_test, f1_test, epoch + 1])
+        result_np = np.array(test_results, dtype=float)
+        np.savetxt(test_result_csv, result_np, fmt='%.4f', delimiter=',')
 
         print(f'Epoch {epoch}: Train loss: {epoch_losses_train[-1]} Test: {epoch_losses_test[-1]}')
+        print(f"Train f1: {f1_train},  Train acc: {acc_train}")
+        print(f"Test f1: {f1_test}, test_acc:{acc_test}")
+        print()
 
 
 

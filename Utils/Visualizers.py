@@ -51,12 +51,12 @@ def plot_single_continuous_plot(x_axis, y_axis, title, x_label_pick, y_label_pic
 
     if not hold_on:
         plt.figure(figsize=FIGSIZE)
-    plt.title(title, fontsize=TITLE_FONT_SIZE, fontweight="bold", fontname="Corbel")
-    plt.xlabel(x_label_pick, fontsize=LABEL_FONT_SIZE, fontweight="normal", fontname="Corbel")
-    plt.ylabel(y_label_pick, fontsize=LABEL_FONT_SIZE, fontweight="normal", fontname="Corbel")
+    plt.title(title, fontsize=TITLE_FONT_SIZE, fontweight="bold")
+    plt.xlabel(x_label_pick, fontsize=LABEL_FONT_SIZE, fontweight="normal")
+    plt.ylabel(y_label_pick, fontsize=LABEL_FONT_SIZE, fontweight="normal")
     if x_axis is None:  # just use arange
         x_axis = np.arange(len(y_axis))
-    plt.plot(x_axis, y_axis, color=color_pick, linestyle=linestyle, label=label)
+    plt.plot(x_axis, y_axis, color=color_pick, linestyle=linestyle, label=label, alpha=0.5)
 
     if x_lim is not None:
         plt.xlim(x_lim)

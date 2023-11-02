@@ -49,8 +49,8 @@ if __name__ =="__main__":
     model = LSTM_AE(input_size, parameters_dict['embedding_dim'],
                     use_bidirectional = parameters_dict['use_bidirectional'],
                     num_layers=parameters_dict['num_lstm_layers'])
-    for param in model.parameters():
-        print(param.data)
+    # for param in model.parameters():
+    #     print(param.data)
     model, best_epoch, [train_losses, test_losses] =  train(model, trainloader, testloader, parameters_dict)
 
     timestring = strftime("%Y-%m-%d_%H-%M-%S", localtime()) + "_Subject%s" % str(

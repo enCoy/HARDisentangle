@@ -25,22 +25,23 @@ def get_parameters(data_name):
     parameters_dict['window_size'] = 50  # 50 hz = 1 sec
     parameters_dict['sampling_rate'] = 50 # hz
     parameters_dict['sliding_window_overlap_ratio'] = 0.5
-    parameters_dict['num_epochs'] = 20
+    parameters_dict['num_epochs'] = 300
     parameters_dict['batch_size'] = 64
-    parameters_dict['lr'] = 0.0001
+    parameters_dict['lr'] = 0.003
     parameters_dict['embedding_dim'] = 64
     parameters_dict['weight_decay'] = 1e-5
     parameters_dict['use_bidirectional'] = False
     parameters_dict['num_lstm_layers'] = 2
     parameters_dict['generator_init_seed'] = 23
+    parameters_dict['common_unique_shared_seed'] = 16
     parameters_dict['mi_coeff'] = 0.0001
     if data_name == 'pamap2':
-        parameters_dict['data_dir'] = os.path.join(BASE_DIR, r"PAMAP2_Dataset\PAMAP2_Dataset\Processed50Hz")
+        parameters_dict['data_dir'] = os.path.join(BASE_DIR, r"PAMAP2_Dataset/PAMAP2_Dataset/Processed50Hz")
         parameters_dict['num_modalities'] = 52  # number of sensor channels
         parameters_dict['num_activities'] = 12
         parameters_dict['num_subjects'] = 8
     elif data_name == 'real':
-        parameters_dict['data_dir'] = os.path.join(BASE_DIR, r"realworld2016_dataset\Processed")
+        parameters_dict['data_dir'] = os.path.join(BASE_DIR, r"realworld2016_dataset/Processed")
         parameters_dict['num_modalities'] = 42  # number of sensor channels
         parameters_dict['num_activities'] = 8
         parameters_dict['num_subjects'] = 15
@@ -51,15 +52,16 @@ def get_parameters(data_name):
 if __name__ == "__main__":
 
     data_name = 'pamap2'  # 'pamap2' or 'real'
-    target_subject = 1
+    target_subject = 2
     if data_name == 'pamap2':
         feature_dim = 9
     else:
         feature_dim = 6
     parameters_dict = get_parameters(data_name)
 
-    positive_representation_model_path = r"C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR\CommonInformation\PositiveSampleGenerator\pamap2\2023-10-31_16-13-22_Subject2"
-    negative_representation_model_path = r"C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR\CommonInformation\NegativeSampleGenerator\pamap2\2023-10-31_15-04-26_Subject2"
+
+    positive_representation_model_path = os.path.join(BASE_DIR, r"CommonInformation\PositiveSampleGenerator\pamap2\2023-10-31_16-13-22_Subject2")
+    negative_representation_model_path = os.path.join(BASE_DIR, r"CommonInformation\NegativeSampleGenerator\pamap2\2023-10-31_15-04-26_Subject2")
 
 
     data_processor = DataProcessor(data_dir=parameters_dict['data_dir'],
@@ -102,7 +104,10 @@ if __name__ == "__main__":
         param.requires_grad = False
     for param in negative_r_model.parameters():
         param.requires_grad = False
+    # initialize with the same seed to ensure that they start from the same place
+    # torch.manual_seed(parameters_dict['common_unique_shared_seed'])
     unique_net = UniqueNet(128, 256, parameters_dict['embedding_dim'])
+    # torch.manual_seed(parameters_dict['common_unique_shared_seed'])
     common_net = CommonNet(128, 256, parameters_dict['embedding_dim'])
     reconstruct_net = ReconstructNet(parameters_dict['embedding_dim'] * 2, 128,
                                      parameters_dict['window_size'] * feature_dim)
@@ -127,7 +132,7 @@ if __name__ == "__main__":
     mse_loss = nn.MSELoss(reduction='mean')
     # optimizer
     optimizer = torch.optim.Adam(list(base_net.parameters()) + list(unique_net.parameters())
-                                 + list(common_net.parameters()) + list(reconstruct_net.parameters()),
+                                 + list(common_net.parameters()) + list(reconstruct_net.parameters()) + list(mine.parameters()),
                                  lr=parameters_dict['lr'], weight_decay=parameters_dict['weight_decay'])
 
     losses_train = {
@@ -139,8 +144,16 @@ if __name__ == "__main__":
         'c_loss_unique_n': [],
         'MI_loss': []
     }
-    losses_test = losses_train.copy()
 
+    losses_test = {
+        'total_loss': [],
+        'reconstruction_loss': [],
+        'c_loss_common_p': [],
+        'c_loss_common_n': [],
+        'c_loss_unique_p': [],
+        'c_loss_unique_n': [],
+        'MI_loss': []
+    }
     for epoch in range(parameters_dict['num_epochs']):
         #enable train mode
         for model in all_models:
@@ -181,7 +194,8 @@ if __name__ == "__main__":
         loss_train = losses_train[key]
         loss_test = losses_test[key]
         # save training result
-        plot_loss_curves(loss_train, loss_test, save_loc=save_dir, show_fig=False)
+        plot_loss_curves(loss_train, loss_test, save_loc=save_dir, show_fig=False,
+                         title=key)
 
     with open(os.path.join(save_dir, 'parameters.txt'), 'w') as f:
         print(parameters_dict, file=f)
