@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
 class CNNBaseNet(nn.Module):
     def __init__(self, input_dim, output_channels, num_time_steps, embedding, train_on_gpu=True):
@@ -25,7 +26,7 @@ class CNNBaseNet(nn.Module):
         self.fc = nn.Linear(7 * self.output_channels, self.embedding)
 
     def forward(self, x):
-        x = x.view(-1, self.input_dim, self.num_time_steps)  # shape (batch_size, channel, win, 1)
+        x = x.reshape(-1, self.input_dim, self.num_time_steps)  # shape (batch_size, channel, win)
         x = x.unsqueeze(dim=3)  # input size: (batch_size, channel, win, 1)
         #basically image height = num_windows, image width = 1, channels = modalities
         # encoder
@@ -41,7 +42,9 @@ class CommonNet(nn.Module):
         self.embedding_dim = embedding_dim
         self.fc = nn.Sequential(nn.Linear(self.embedding_dim, hidden_1),
                               nn.ReLU(),
-                              nn.Linear(hidden_1, hidden_2))
+                                nn.Linear(hidden_1, hidden_1 // 2),
+                                nn.ReLU(),
+                                nn.Linear(hidden_1 // 2, hidden_2))
         self.train_on_gpu = train_on_gpu
 
 
@@ -54,7 +57,9 @@ class ReconstructNet(nn.Module):
         self.embedding_dim = embedding_dim
         self.fc = nn.Sequential(nn.Linear(self.embedding_dim, hidden_1),
                               nn.ReLU(),
-                              nn.Linear(hidden_1, output))
+                              nn.Linear(hidden_1, hidden_1),
+                                nn.ReLU(),
+                                nn.Linear(hidden_1, output))
         self.train_on_gpu = train_on_gpu
 
 
@@ -67,7 +72,9 @@ class UniqueNet(nn.Module):
         self.embedding_dim = embedding_dim
         self.fc = nn.Sequential(nn.Linear(self.embedding_dim, hidden_1),
                                 nn.ReLU(),
-                                nn.Linear(hidden_1, hidden_2))
+                                nn.Linear(hidden_1, hidden_1 // 2),
+                                nn.ReLU(),
+                                nn.Linear(hidden_1 // 2, hidden_2))
         self.train_on_gpu = train_on_gpu
 
 
@@ -102,15 +109,15 @@ class Mine(nn.Module):
         super(Mine, self).__init__()
         self.fcx = nn.Sequential(nn.Linear(x_dim, hidden_dim),
                                        nn.ReLU(),
-                                       nn.Linear(hidden_dim, hidden_dim // 2),)
+                                       nn.Linear(hidden_dim, hidden_dim // 4),)
         self.fcz = nn.Sequential(nn.Linear(z_dim, hidden_dim),
                                        nn.ReLU(),
-                                       nn.Linear(hidden_dim, hidden_dim // 2))
-        self.fc = nn.Linear(hidden_dim // 2, 1)
+                                       nn.Linear(hidden_dim, hidden_dim // 4))
+        self.fc = nn.Linear(hidden_dim // 4, 1)
         self.train_on_gpu = train_on_gpu
 
     def forward(self, x, z):
-        h1 = F.leaky_relu(self.fcx(x) + self.fcz(z))
+        h1 = F.relu(self.fcx(x) + self.fcz(z))
         h2 = self.fc(h1)
         return h2
 
@@ -125,24 +132,50 @@ def train_one_epoch(loader, optimizer, fuse_net, positive_r_model, negative_r_mo
         'c_loss_unique_p': [],
         'c_loss_unique_n': [],
         'MI_loss': []}
+    ma_et = 1
     if mode == 'train':
         for batch_idx, (inputs, targets) in enumerate(loader):
             optimizer.zero_grad()
-            total_loss, batch_losses = forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model, mine,
-                 mse_loss, contrastive_loss, mi_estimator, batch_losses)
+            total_loss, batch_losses, ma_et = forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model, mine,
+                 mse_loss, contrastive_loss, mi_estimator, batch_losses, ma_et)
             total_loss.backward()
             optimizer.step()
     else:  # val or test
         with torch.no_grad():
             for batch_idx, (inputs, targets) in enumerate(loader):
-                total_loss, batch_losses = forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model,
+                total_loss, batch_losses, ma_et = forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model,
                                                         mine,
-                                                        mse_loss, contrastive_loss, mi_estimator, batch_losses)
+                                                        mse_loss, contrastive_loss, mi_estimator, batch_losses, ma_et)
+    return batch_losses
+
+def train_one_epoch_v2(loader, optimizer, fuse_net, mine,
+                    mse_loss, contrastive_loss, mi_estimator, mode):
+    # version without positive and negative representations
+    batch_losses = {'total_loss': [],
+        'reconstruction_loss': [],
+        'c_loss_common_p': [],
+        'c_loss_common_n': [],
+        'c_loss_unique_p': [],
+        'c_loss_unique_n': [],
+        'MI_loss': []}
+    ma_et = 1
+    if mode == 'train':
+        for batch_idx, (inputs, targets) in enumerate(loader):
+            optimizer.zero_grad()
+            total_loss, batch_losses, ma_et = forward_pass_v2(inputs, targets, fuse_net, mine,
+                 mse_loss, contrastive_loss, mi_estimator, batch_losses, ma_et)
+            total_loss.backward()
+            optimizer.step()
+    else:  # val or test
+        with torch.no_grad():
+            for batch_idx, (inputs, targets) in enumerate(loader):
+                total_loss, batch_losses, ma_et = forward_pass_v2(inputs, targets, fuse_net, mine,
+                                                        mse_loss, contrastive_loss, mi_estimator, batch_losses, ma_et)
     return batch_losses
 
 
 def forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model, mine,
-                 mse_loss, contrastive_loss, mi_estimator, batch_losses):
+                 mse_loss, contrastive_loss, mi_estimator, batch_losses, ma_et):
     inputs, targets = inputs.cuda(), targets.cuda()
     reconstructed, common_representation, unique_representation = fuse_net(inputs)
     # input shape (N x NumWindows x feature_dim)
@@ -163,10 +196,20 @@ def forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model, 
     # this is how several people sample marginal distribution
     unique_shuffled = torch.index_select(  # shuffles the noise
         unique_representation, 0, torch.randperm(unique_representation.shape[0]).cuda())
-    mi_score = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
-    MI_loss = 0.25 * mi_score
-    total_loss = reconstruction_loss + c_loss_common_p + c_loss_common_n \
-                 + c_loss_unique_p + c_loss_unique_n + MI_loss
+    # mi_score = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
+    # source: https://github.com/sungyubkim/MINE-Mutual-Information-Neural-Estimation-/blob/master/MINE.ipynb
+    ma_rate = 0.05
+    mi_lb, joint, et = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
+    ma_et = (1 - ma_rate) * ma_et + ma_rate * torch.mean(et)
+    # unbiasing use moving average
+    MI_loss = -(torch.mean(joint) - (1 / ma_et.mean()).detach() * torch.mean(et))
+
+    lambda_reconst = 1.0
+    lambda_contrast = 1.0
+    lambda_MI = 0.5
+
+    total_loss = lambda_reconst*reconstruction_loss + lambda_contrast*(c_loss_common_p + c_loss_common_n \
+                 + c_loss_unique_p + c_loss_unique_n) + lambda_MI*MI_loss
     # add batch losses
     batch_losses['total_loss'].append(total_loss.item())
     batch_losses['reconstruction_loss'].append(reconstruction_loss.detach().item())
@@ -175,4 +218,59 @@ def forward_pass(inputs, targets, fuse_net, positive_r_model, negative_r_model, 
     batch_losses['c_loss_unique_p'].append(c_loss_unique_p.detach().item())
     batch_losses['c_loss_unique_n'].append(c_loss_unique_n.detach().item())
     batch_losses['MI_loss'].append(MI_loss.detach().item())
-    return total_loss, batch_losses
+    return total_loss, batch_losses, ma_et
+
+
+def forward_pass_v2(inputs, targets, fuse_net, mine,
+                 mse_loss, contrastive_loss, mi_estimator, batch_losses, ma_et):
+    [inputs, positives, negatives] = np.split(inputs, 3,axis=-1)
+    inputs, positives, negatives, targets = inputs.cuda(), positives.cuda(), negatives.cuda(), targets.cuda()
+
+    # positives are other modalities
+    _, positive_common, positive_unique = fuse_net(positives)
+    # negatives are same modality different windows
+    _, negative_common, negative_unique = fuse_net(negatives)
+    # anchor signal
+    reconstructed, common_representation, unique_representation = fuse_net(inputs)
+    # input shape (N x NumWindows x feature_dim)
+    negative_common = negative_common-positive_common
+    # for common representation - positives are positives - negatives are negatives
+    # for unique representation - vice versa
+    # calculate losses
+    # reconstruction
+    reconstruction_loss = mse_loss(reconstructed, targets)
+    # contrastive
+    # we want common and positive_common to be similar
+    c_loss_common_p = contrastive_loss(common_representation, positive_common, label=0)
+    # we want common and negative_common to be dissimilar -i.e. common info of that window should be dissimilar to another window's common
+    c_loss_common_n = contrastive_loss(common_representation, negative_common, label=1)  # problematic
+    # we want unique and positive unique to be dissimilar, i.e. unique info of that window
+    c_loss_unique_p = contrastive_loss(unique_representation, positive_unique, label=1)  # problematic
+    c_loss_unique_n = contrastive_loss(unique_representation, negative_unique, label=0)
+    # mutual info
+    # this is how several people sample marginal distribution
+    unique_shuffled = torch.index_select(  # shuffles the noise
+        unique_representation, 0, torch.randperm(unique_representation.shape[0]).cuda())
+    # mi_score = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
+    # source: https://github.com/sungyubkim/MINE-Mutual-Information-Neural-Estimation-/blob/master/MINE.ipynb
+    ma_rate = 0.05
+    mi_lb, joint, et = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
+    ma_et = (1 - ma_rate) * ma_et + ma_rate * torch.mean(et)
+    # unbiasing use moving average
+    MI_loss = -(torch.mean(joint) - (1 / ma_et.mean()).detach() * torch.mean(et))
+
+    lambda_reconst = 1.0
+    lambda_contrast = 1.0
+    lambda_MI = 0.5
+
+    total_loss = lambda_reconst*reconstruction_loss + lambda_contrast*(c_loss_common_p + c_loss_common_n \
+                 + c_loss_unique_p + c_loss_unique_n) + lambda_MI*MI_loss
+    # add batch losses
+    batch_losses['total_loss'].append(total_loss.item())
+    batch_losses['reconstruction_loss'].append(reconstruction_loss.detach().item())
+    batch_losses['c_loss_common_p'].append(c_loss_common_p.detach().item())
+    batch_losses['c_loss_common_n'].append(c_loss_common_n.detach().item())
+    batch_losses['c_loss_unique_p'].append(c_loss_unique_p.detach().item())
+    batch_losses['c_loss_unique_n'].append(c_loss_unique_n.detach().item())
+    batch_losses['MI_loss'].append(MI_loss.detach().item())
+    return total_loss, batch_losses, ma_et

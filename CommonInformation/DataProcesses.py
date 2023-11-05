@@ -118,15 +118,59 @@ class DataProcessor():
             for modality in modalities:
                 current_modality_data = data_dict[(subject_idx, modality)][0]
                 # standardize
-                current_modality_data, _ = standardize_data(current_modality_data,
+                current_modality_data_standardized, _ = standardize_data(current_modality_data,
                                                             self.standardizers[(self.target_subject_num, modality)],
                                                             is_generated=True)
                 if subject_idx == self.target_subject_num:
-                    test_X = np.vstack((test_X, current_modality_data))
+                    test_X = np.vstack((test_X, current_modality_data_standardized))
                     test_y = np.vstack((test_y, current_modality_data))
                 else:
-                    train_X = np.vstack((train_X, current_modality_data))
+                    train_X = np.vstack((train_X, current_modality_data_standardized))
                     train_y = np.vstack((train_y, current_modality_data))
+        print("Samples are generated!")
+        print(f'Samples train X shape ->', train_X.shape)
+        print(f'Samples train y shape ->', train_y.shape)
+        print(f'Samples test X shape ->', test_X.shape)
+        print(f'Samples test y shape ->', test_y.shape)
+        return train_X, train_y, test_X, test_y
+
+    def get_modality_separated_train_test_and_pn(self, data_dict, modalities):
+        # will return train test datasets as well as positive and negative samples
+        train_X = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
+        # total number of samples = ((P-1) x N_windows_per_subject) x M x M-1 ..from P-1 non-target subjects, N windows, M modalities, M-1 other modalities
+        train_y = np.empty((0, self.window_size, self.num_modalities_per_location))
+        test_X = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
+        test_y = np.empty((0, self.window_size, self.num_modalities_per_location))
+        for subject_idx in range(1, self.num_subjects + 1):
+            for modality in modalities:
+                other_modalities = [mm for mm in modalities if mm != modality]
+                for other_modality in other_modalities:
+                    current_modality_data = data_dict[(subject_idx, modality)][0]
+                    # positive samples are other modalities but the same window
+                    positive_samples = data_dict[(subject_idx, other_modality)][0]
+                    # negative samples are the same modality but different windows - shuffled
+                    negative_samples = data_dict[(subject_idx, modality)][0]
+                    shuffling_idx = np.random.randint(low=0, high=negative_samples.shape[0], size=len(negative_samples))
+                    negative_samples = negative_samples[shuffling_idx]
+                    # standardize
+                    anchor_samples, _ = standardize_data(current_modality_data,
+                                                                self.standardizers[(self.target_subject_num, modality)],
+                                                                is_generated=True)
+                    positive_samples, _ = standardize_data(positive_samples,
+                                                              self.standardizers[(self.target_subject_num, other_modality)],
+                                                              is_generated=True)
+                    negative_samples, _ = standardize_data(negative_samples,
+                                                           self.standardizers[
+                                                               (self.target_subject_num, modality)],
+                                                           is_generated=True)
+                    # first stack along feature direction
+                    input_data = np.concatenate((anchor_samples, positive_samples, negative_samples), axis=-1)
+                    if subject_idx == self.target_subject_num:
+                        test_X = np.vstack((test_X, input_data))
+                        test_y = np.vstack((test_y, current_modality_data))
+                    else:
+                        train_X = np.vstack((train_X, input_data))
+                        train_y = np.vstack((train_y, current_modality_data))
         print("Samples are generated!")
         print(f'Samples train X shape ->', train_X.shape)
         print(f'Samples train y shape ->', train_y.shape)
@@ -189,7 +233,6 @@ class DataProcessor():
                     if j != i:
                         modality_data = self.data_dict[(i+1, modality)][0]  # input data of that modality
                         all_data_to_calculate_scaler = np.vstack((all_data_to_calculate_scaler, modality_data))
-                print("modality all_data_to_calculate_scaler shape: ", all_data_to_calculate_scaler.shape)
                 _, modality_standardizer = standardize_data(all_data_to_calculate_scaler, StandardScaler(), is_generated=False)
                 standardizers[(i+1, modality)] = modality_standardizer
         return standardizers

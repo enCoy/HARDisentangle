@@ -157,7 +157,7 @@ def convert_win_path(win_path):
 
 
 # custom loss functions
-def contrastive_loss_criterion(x1, x2, label, margin: float = 2.5):
+def contrastive_loss_criterion(x1, x2, label, margin: float = 7):
     """
     Computes Contrastive Loss
     """
@@ -165,10 +165,6 @@ def contrastive_loss_criterion(x1, x2, label, margin: float = 2.5):
     dist = torch.nn.functional.pairwise_distance(x1, x2)
     # if the difference is above margin, that means they are separated enough and no more separation will occur
     loss = (1 - label) * torch.pow(dist, 2) + (label) * torch.pow(torch.clamp(margin - dist, min=0.0), 2)
-    if label == 1:
-        print("dist: ", dist)
-        print("margin - dist: ", margin - dist)
-        print("and hereeeee: ", torch.pow(torch.clamp(margin - dist, min=0.0), 2))
     loss = torch.mean(loss)
 
     return loss
@@ -176,3 +172,9 @@ def contrastive_loss_criterion(x1, x2, label, margin: float = 2.5):
 def mi_estimator(mine, x, z, z_marg):
     joint, marginal = mine(x, z), mine(x, z_marg)
     return torch.mean(joint) - torch.log(torch.mean(torch.exp(marginal)))
+
+def mutual_information(mine, x, z, z_marg):
+    joint, marginal = mine(x, z), mine(x, z_marg)
+    et = torch.exp(marginal)
+    mi_lb = torch.mean(joint) - torch.log(torch.mean(et))
+    return mi_lb, joint, et

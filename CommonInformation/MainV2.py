@@ -1,10 +1,13 @@
+# in this one, positive and negative representation encoders will be removed
+# positive and negative samples will be fed directly
+
 import numpy as np
 import os
 from DataProcesses import DataProcessor
 from Utils.HelperFunctions import  convert_to_torch, plot_loss_curves
 from CommonInformation.Models.CommonNetModels import CNNBaseNet
 from CommonInformation.Models.LSTMAE import LSTM_AE
-from CommonInformation.Models.CommonNetModels import train_one_epoch
+from CommonInformation.Models.CommonNetModels import train_one_epoch_v2
 from Models.CommonNetModels import FuseNet, CommonNet, UniqueNet, ReconstructNet, Mine
 import warnings
 from time import localtime, strftime
@@ -25,7 +28,7 @@ def get_parameters(data_name):
     parameters_dict['window_size'] = 50  # 50 hz = 1 sec
     parameters_dict['sampling_rate'] = 50 # hz
     parameters_dict['sliding_window_overlap_ratio'] = 0.5
-    parameters_dict['num_epochs'] = 300
+    parameters_dict['num_epochs'] = 10
     parameters_dict['batch_size'] = 128
     parameters_dict['lr'] = 0.003
     parameters_dict['embedding_dim'] = 128
@@ -73,7 +76,7 @@ if __name__ == "__main__":
                  sampling_rate=parameters_dict['sampling_rate'],
                     sliding_window_overlap_ratio=parameters_dict['sliding_window_overlap_ratio'])
 
-    train_X, train_y, test_X, test_y = data_processor.get_modality_separated_train_test(data_processor.data_dict,
+    train_X, train_y, test_X, test_y = data_processor.get_modality_separated_train_test_and_pn(data_processor.data_dict,
                                                                                         data_processor.modalities)
     train_X, train_y, test_X, test_y = convert_to_torch(train_X, train_y, test_X, test_y)
 
@@ -88,21 +91,6 @@ if __name__ == "__main__":
     base_net = CNNBaseNet(input_dim=feature_dim, output_channels=128, embedding=1024,
                        num_time_steps=parameters_dict['window_size'])
 
-    positive_r_model = LSTM_AE(feature_dim, parameters_dict['embedding_dim'],
-                    use_bidirectional=parameters_dict['use_bidirectional'],
-                    num_layers=parameters_dict['num_lstm_layers'])
-    positive_r_model.load_state_dict(torch.load(os.path.join(positive_representation_model_path, 'positiveGeneratorStateDict.pth')))
-    negative_r_model = LSTM_AE(feature_dim, parameters_dict['embedding_dim'],
-                               use_bidirectional=parameters_dict['use_bidirectional'],
-                               num_layers=parameters_dict['num_lstm_layers'])
-    negative_r_model.load_state_dict(
-        torch.load(os.path.join(negative_representation_model_path, 'negativeGeneratorStateDict.pth')))
-
-    # freeze these two
-    for param in positive_r_model.parameters():
-        param.requires_grad = False
-    for param in negative_r_model.parameters():
-        param.requires_grad = False
     # initialize with the same seed to ensure that they start from the same place
     # torch.manual_seed(parameters_dict['common_unique_shared_seed'])
     unique_net = UniqueNet(1024, 256, parameters_dict['embedding_dim'])
@@ -116,16 +104,13 @@ if __name__ == "__main__":
     mine = Mine(x_dim=parameters_dict['embedding_dim'], z_dim=parameters_dict['embedding_dim'],
                 hidden_dim=parameters_dict['embedding_dim'] // 2)
 
-    all_models = [base_net, unique_net, common_net, reconstruct_net, mine, positive_r_model, negative_r_model]
-    all_models_names = ['base_net', 'unique_net', 'common_net', 'reconstruct_net', 'mine', 'positive_r_model', 'negative_r_model']
+    all_models = [base_net, unique_net, common_net, reconstruct_net, mine]
+    all_models_names = ['base_net', 'unique_net', 'common_net', 'reconstruct_net', 'mine']
     for m in range(len(all_models)):
         model = all_models[m]
         model_name = all_models_names[m]
         if (model.train_on_gpu):
             model.cuda()
-
-    positive_r_model = positive_r_model.encoder
-    negative_r_model = negative_r_model.encoder
 
     # losses
     mse_loss = nn.MSELoss(reduction='mean')
@@ -157,7 +142,7 @@ if __name__ == "__main__":
         #enable train mode
         for model in all_models:
             model.train()
-        all_batch_losses_train = train_one_epoch(trainloader, optimizer, fuse_net, positive_r_model, negative_r_model, mine,
+        all_batch_losses_train = train_one_epoch_v2(trainloader, optimizer, fuse_net, mine,
                         mse_loss, contrastive_loss_criterion, mutual_information, mode='train')
         # add losses
         for loss_key in list(all_batch_losses_train.keys()):
@@ -166,7 +151,7 @@ if __name__ == "__main__":
         # enable test mode
         for model in all_models:
             model.eval()
-        all_batch_losses_test = train_one_epoch(testloader, optimizer, fuse_net, positive_r_model, negative_r_model, mine,
+        all_batch_losses_test = train_one_epoch_v2(testloader, optimizer, fuse_net, mine,
                                            mse_loss, contrastive_loss_criterion, mutual_information, mode='test')
         # add losses
         for loss_key in list(all_batch_losses_test.keys()):
