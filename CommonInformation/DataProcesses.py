@@ -134,49 +134,129 @@ class DataProcessor():
         print(f'Samples test y shape ->', test_y.shape)
         return train_X, train_y, test_X, test_y
 
-    def get_modality_separated_train_test_and_pn(self, data_dict, modalities):
+    def get_modality_separated_train_test_and_pn(self, data_dict, modalities, negative_sample_shift=3):
+
         # will return train test datasets as well as positive and negative samples
         train_X = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
         # total number of samples = ((P-1) x N_windows_per_subject) x M x M-1 ..from P-1 non-target subjects, N windows, M modalities, M-1 other modalities
-        train_y = np.empty((0, self.window_size, self.num_modalities_per_location))
+        train_y = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
         test_X = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
-        test_y = np.empty((0, self.window_size, self.num_modalities_per_location))
+        test_y = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
         for subject_idx in range(1, self.num_subjects + 1):
             for modality in modalities:
                 other_modalities = [mm for mm in modalities if mm != modality]
                 for other_modality in other_modalities:
-                    current_modality_data = data_dict[(subject_idx, modality)][0]
+                    anchor_samples = data_dict[(subject_idx, modality)][0]
                     # positive samples are other modalities but the same window
-                    positive_samples = data_dict[(subject_idx, other_modality)][0]
+                    positive_samples_b = data_dict[(subject_idx, other_modality)][0]
                     # negative samples are the same modality but different windows - shuffled
-                    negative_samples = data_dict[(subject_idx, modality)][0]
-                    shuffling_idx = np.random.randint(low=0, high=negative_samples.shape[0], size=len(negative_samples))
-                    negative_samples = negative_samples[shuffling_idx]
+                    negative_samples_b = data_dict[(subject_idx, modality)][0]
+                    # shuffling_idx = np.random.randint(low=0, high=negative_samples.shape[0], size=len(negative_samples))
+                    # negative_samples = negative_samples[shuffling_idx]
+
+                    # shift for negative samples
+                    positive_samples_b = positive_samples_b[:-negative_sample_shift, :, :]
+                    anchor_samples = anchor_samples[:-negative_sample_shift, :, :]
+                    negative_samples_b = negative_samples_b[negative_sample_shift:, :, :]
+
                     # standardize
-                    anchor_samples, _ = standardize_data(current_modality_data,
+                    anchor_samples, _ = standardize_data(anchor_samples,
                                                                 self.standardizers[(self.target_subject_num, modality)],
                                                                 is_generated=True)
-                    positive_samples, _ = standardize_data(positive_samples,
+                    positive_samples, _ = standardize_data(positive_samples_b,
                                                               self.standardizers[(self.target_subject_num, other_modality)],
                                                               is_generated=True)
-                    negative_samples, _ = standardize_data(negative_samples,
+                    negative_samples, _ = standardize_data(negative_samples_b,
                                                            self.standardizers[
                                                                (self.target_subject_num, modality)],
                                                            is_generated=True)
                     # first stack along feature direction
                     input_data = np.concatenate((anchor_samples, positive_samples, negative_samples), axis=-1)
+                    target_data = np.concatenate((anchor_samples, positive_samples_b, negative_samples_b), axis=-1)
                     if subject_idx == self.target_subject_num:
                         test_X = np.vstack((test_X, input_data))
-                        test_y = np.vstack((test_y, current_modality_data))
+                        test_y = np.vstack((test_y, target_data))
                     else:
                         train_X = np.vstack((train_X, input_data))
-                        train_y = np.vstack((train_y, current_modality_data))
+                        train_y = np.vstack((train_y, target_data))
         print("Samples are generated!")
         print(f'Samples train X shape ->', train_X.shape)
         print(f'Samples train y shape ->', train_y.shape)
         print(f'Samples test X shape ->', test_X.shape)
         print(f'Samples test y shape ->', test_y.shape)
         return train_X, train_y, test_X, test_y
+
+    def get_modality_separated_train_test_and_pn_v2(self, data_dict, modalities):
+        # difference of this method from the previous one is that this will return anchor = negative
+        # also it will return samples separated based on modality
+        dict_keys = self.modalities
+        train_X, train_y, test_X, test_y = {}, {}, {}, {}
+        for modality in dict_keys:
+            train_X[modality] = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
+            train_y[modality] = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
+            test_X[modality] = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
+            test_y[modality] = np.empty((0, self.window_size, self.num_modalities_per_location * 3))
+
+        for modality in modalities:
+            other_modalities = [mm for mm in modalities if mm != modality]
+            for subject_idx in range(1, self.num_subjects + 1):
+                for other_modality in other_modalities:
+                    anchor_samples = data_dict[(subject_idx, modality)][0]
+                    # positive samples are other modalities but the same window
+                    positive_samples_b = data_dict[(subject_idx, other_modality)][0]
+                    # negative samples are the same modality but different windows - shuffled
+                    negative_samples_b = data_dict[(subject_idx, modality)][0]
+                    # shuffling_idx = np.random.randint(low=0, high=negative_samples.shape[0], size=len(negative_samples))
+                    # negative_samples = negative_samples[shuffling_idx]
+
+                    # standardize
+                    anchor_samples, _ = standardize_data(anchor_samples,
+                                                                self.standardizers[(self.target_subject_num, modality)],
+                                                                is_generated=True)
+                    positive_samples, _ = standardize_data(positive_samples_b,
+                                                              self.standardizers[(self.target_subject_num, other_modality)],
+                                                              is_generated=True)
+                    negative_samples, _ = standardize_data(negative_samples_b,
+                                                           self.standardizers[
+                                                               (self.target_subject_num, modality)],
+                                                           is_generated=True)
+                    # first stack along feature direction
+                    input_data = np.concatenate((anchor_samples, positive_samples, negative_samples), axis=-1)
+                    target_data = np.concatenate((anchor_samples, positive_samples_b, negative_samples_b), axis=-1)
+                    if subject_idx == self.target_subject_num:
+                        test_X[modality] = np.vstack((test_X[modality], input_data))
+                        test_y[modality] = np.vstack((test_y[modality], target_data))
+                    else:
+                        train_X[modality] = np.vstack((train_X[modality], input_data))
+                        train_y[modality] = np.vstack((train_y[modality], target_data))
+            print("Samples are generated!")
+            print(f'Samples train X shape ->', train_X[modality].shape)
+            print(f'Samples train y shape ->', train_y[modality].shape)
+            print(f'Samples test X shape ->', test_X[modality].shape)
+            print(f'Samples test y shape ->', test_y[modality].shape)
+
+        train_X_all_modalities = None
+        train_y_all_modalities = None
+        test_X_all_modalities = None
+        test_y_all_modalities = None
+        for modality in dict_keys:
+            if train_X_all_modalities is None:
+                train_X_all_modalities = train_X[modality][:, :, :, np.newaxis]
+                train_y_all_modalities = train_y[modality][:, :, :, np.newaxis]
+                test_X_all_modalities = test_X[modality][:, :, :, np.newaxis]
+                test_y_all_modalities = test_y[modality][:, :, :, np.newaxis]
+            else:
+                train_X_all_modalities = np.concatenate((train_X_all_modalities, train_X[modality][:, :, :, np.newaxis]), axis=3)
+                train_y_all_modalities = np.concatenate((train_y_all_modalities, train_y[modality][:, :, :, np.newaxis]), axis=3)
+                test_X_all_modalities = np.concatenate((test_X_all_modalities, test_X[modality][:, :, :, np.newaxis]), axis=3)
+                test_y_all_modalities = np.concatenate((test_y_all_modalities, test_y[modality][:, :, :, np.newaxis]), axis=3)
+
+        print("All Samples are generated!")
+        print(f'All Samples train X shape ->', train_X_all_modalities.shape)
+        print(f'All Samples train y shape ->', train_y_all_modalities.shape)
+        print(f'All Samples test X shape ->', test_X_all_modalities.shape)
+        print(f'All Samples test y shape ->', test_y_all_modalities.shape)
+        return train_X_all_modalities, train_y_all_modalities, test_X_all_modalities, test_y_all_modalities
 
     def get_modality_separated_train_test_classification_data(self, data_dict, modalities):
         # will create two arrays -
