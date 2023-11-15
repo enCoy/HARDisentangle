@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-
+import numpy as np
 
 
 class ClassifierNet(nn.Module):
@@ -8,9 +8,11 @@ class ClassifierNet(nn.Module):
         super(ClassifierNet, self).__init__()
         self.common_rep_dim = common_rep_dim
         self.output_dim = output_dim
-        self.fc = nn.Sequential(nn.Linear(self.common_rep_dim, 2*hidden_1),
+        self.fc = nn.Sequential(nn.Linear(self.common_rep_dim, hidden_1),
+                                nn.BatchNorm1d(hidden_1),
                                 nn.ReLU(),
-                                nn.Linear(2*hidden_1, hidden_1),
+                                nn.Linear(hidden_1, hidden_1),
+                                nn.BatchNorm1d(hidden_1),
                                 nn.ReLU(),
                                 nn.Linear(hidden_1, self.output_dim))
         self.train_on_gpu = train_on_gpu
@@ -20,33 +22,53 @@ class ClassifierNet(nn.Module):
 
 
 
-def train_one_epoch(loader, optimizer, base_net, common_net, classification_net, criterion, mode):
-    batch_losses = []
-    all_ground_truth = []
-    all_predictions = []
+def train_one_epoch(loader, optimizers, models, criterion, modalities, mode):
+    batch_losses = {}
+    all_ground_truth = {}
+    all_predictions = {}
+    for modality in modalities:
+        batch_losses[modality] = []
+        all_ground_truth[modality] = []
+        all_predictions[modality] = []
+
     if mode == 'train':
         for batch_idx, (inputs, targets) in enumerate(loader):
+            inputs_list = np.split(inputs, len(modalities), axis=-1)
             # zero the parameter gradients
-            optimizer.zero_grad()
-            # get the inputs; data is a list of [inputs, labels]
-            loss, all_ground_truth, all_predictions = forward_pass(inputs, targets, base_net, common_net, classification_net, criterion,
-                                                                   all_ground_truth, all_predictions)
-            batch_losses.append(loss.detach().item())
-            loss.backward()
-            optimizer.step()
+            for modality_idx in range(len(modalities)):
+                modality = modalities[modality_idx]
+                input_modality = torch.squeeze(inputs_list[modality_idx])
+
+                optimizers[modality].zero_grad()
+                # get the inputs; data is a list of [inputs, labels]
+                modality_loss, all_ground_truth[modality], all_predictions[modality] = forward_pass(input_modality, targets,
+                                                                       models[modality]['base'], models[modality]['common'], models[modality]['classification'],
+                                                                       criterion, all_ground_truth[modality], all_predictions[modality])
+                batch_losses[modality].append(modality_loss.detach().item())
+                modality_loss.backward()
+                optimizers[modality].step()
     else:  # val or test
         for batch_idx, (inputs, targets) in enumerate(loader):
             # get the inputs; data is a list of [inputs, labels]
-            loss, all_ground_truth, all_predictions = forward_pass(inputs, targets, base_net, common_net, classification_net, criterion,
-                                all_ground_truth, all_predictions)
-            batch_losses.append(loss.detach().item())
+            inputs_list = np.split(inputs, len(modalities), axis=-1)
+            for modality_idx in range(len(modalities)):
+                modality = modalities[modality_idx]
+                input_modality = torch.squeeze(inputs_list[modality_idx])
+                # get the inputs; data is a list of [inputs, labels]
+                modality_loss, all_ground_truth[modality], all_predictions[modality] = forward_pass(input_modality, targets,
+                                                                       models[modality]['base'], models[modality]['common'], models[modality]['classification'],
+                                                                       criterion, all_ground_truth[modality], all_predictions[modality])
+                batch_losses[modality].append(modality_loss.detach().item())
+
     return batch_losses, all_ground_truth, all_predictions
 
 def forward_pass(inputs, targets, base_net, common_net, classification_net, criterion,
                  all_ground_truth, all_predictions):
+
     inputs, targets = inputs.cuda(), targets.cuda()
     outputs = base_net(inputs)
     outputs = common_net(outputs)
+
     outputs = classification_net(outputs)
     loss = criterion(outputs, torch.max(targets, 1)[1])
 

@@ -31,10 +31,10 @@ def get_parameters(data_name):
     parameters_dict['window_size'] = 50  # 50 hz = 1 sec
     parameters_dict['sampling_rate'] = 50 # hz
     parameters_dict['sliding_window_overlap_ratio'] = 0.5
-    parameters_dict['num_epochs'] = 5
-    parameters_dict['batch_size'] = 2
+    parameters_dict['num_epochs'] = 50
+    parameters_dict['batch_size'] = 64
     parameters_dict['lr'] = 0.0003
-    parameters_dict['embedding_dim'] = 128
+    parameters_dict['embedding_dim'] = 256
     parameters_dict['weight_decay'] = 1e-6
     parameters_dict['use_bidirectional'] = False
     parameters_dict['num_lstm_layers'] = 2
@@ -90,7 +90,7 @@ def enable_mode(model_dict, mode='train'):
             model_dict[key].eval()
     return model_dict
 
-def save_models(glob_models, local_models, save_dir):
+def save_models(glob_models, local_models_neg, local_models_pos, save_dir):
     # save glob model
     glob_model_keys = list(glob_models.keys())
     for key in glob_model_keys:
@@ -99,13 +99,21 @@ def save_models(glob_models, local_models, save_dir):
         torch.save(model.state_dict(), os.path.join(save_dir, f"glob_{key}_stateDict.pth"))
         # save model
         torch.save(model, os.path.join(save_dir, f"glob_{key}.pth"))
-    # save local models
+    # save local models - first negative
     for modality in modalities:
-        local_model_keys = list(local_models[modality].keys())
+        local_model_keys = list(local_models_neg[modality].keys())
         for key in local_model_keys:
-            model = local_models[modality][key]
+            model = local_models_neg[modality][key]
             # save state dict
-            torch.save(model.state_dict(), os.path.join(save_dir, f"{modality}_{key}_stateDict.pth"))
+            torch.save(model.state_dict(), os.path.join(save_dir, f"{modality}_{key}_neg_stateDict.pth"))
+            # save model
+            torch.save(model, os.path.join(save_dir, f"{modality}_{key}.pth"))
+    for modality in modalities:
+        local_model_keys = list(local_models_pos[modality].keys())
+        for key in local_model_keys:
+            model = local_models_pos[modality][key]
+            # save state dict
+            torch.save(model.state_dict(), os.path.join(save_dir, f"{modality}_{key}_pos_stateDict.pth"))
             # save model
             torch.save(model, os.path.join(save_dir, f"{modality}_{key}.pth"))
 
@@ -145,10 +153,13 @@ if __name__ == "__main__":
     #start with global model that takes multiple modalities
     glob_models = get_models(parameters_dict)
     # now for each modality we are going to have separate base_net, unique_net and reconstruct net
-    local_models = {}
+    local_models_neg = {}
+    local_models_pos = {}
     for modality in modalities:
-        local = get_models(parameters_dict)
-        local_models[modality] = local
+        local_neg = get_models(parameters_dict)
+        local_pos = get_models(parameters_dict)
+        local_models_neg[modality] = local_neg
+        local_models_pos[modality] = local_pos
 
     # push global models to gpu
     glob_models_to_push = ['base', 'common', 'unique', 'reconst', 'fuse', 'mine']
@@ -160,8 +171,11 @@ if __name__ == "__main__":
         for model_name in local_models_to_push:
             print("modality: ", modality)
             print("model name:", model_name)
-            if local_models[modality][model_name].train_on_gpu:
-                local_models[modality][model_name].cuda()
+            if local_models_neg[modality][model_name].train_on_gpu:
+                local_models_neg[modality][model_name].cuda()
+            if local_models_pos[modality][model_name].train_on_gpu:
+                local_models_pos[modality][model_name].cuda()
+
 
     # losses
     mse_loss = nn.MSELoss(reduction='mean')
@@ -170,11 +184,25 @@ if __name__ == "__main__":
     glob_optimizer = torch.optim.Adam(list(glob_models['base'].parameters()) + list(glob_models['unique'].parameters())
                                  + list(glob_models['common'].parameters()) + list(glob_models['reconst'].parameters()) + list(glob_models['mine'].parameters()),
                                  lr=parameters_dict['lr'], weight_decay=parameters_dict['weight_decay'])
-    local_optimizers = {}
+    local_optimizers_neg = {}
+    local_optimizers_pos = {}
     for modality in modalities:
-        local_optimizers[modality] = torch.optim.Adam(list(glob_models['base'].parameters()) + list(glob_models['unique'].parameters())
-                                  + list(glob_models['reconst'].parameters()),
+        local_optimizers_neg[modality] = torch.optim.Adam(list(local_models_neg[modality]['base'].parameters())
+                                                          + list(local_models_neg[modality]['unique'].parameters())
+                                  + list(local_models_neg[modality]['reconst'].parameters()),
                                  lr=parameters_dict['lr'], weight_decay=parameters_dict['weight_decay'])
+        local_optimizers_pos[modality] = torch.optim.Adam(list(local_models_pos[modality]['base'].parameters())
+                                                          + list(local_models_pos[modality]['unique'].parameters())
+                                                          + list(local_models_pos[modality]['reconst'].parameters()),
+                                                          lr=parameters_dict['lr'],
+                                                          weight_decay=parameters_dict['weight_decay'])
+
+    losses_neg = {
+        'reconstruction_loss': []
+    }
+    losses_pos = {
+        'reconstruction_loss': []
+    }
 
     losses_train = {
         'total_loss': [],
@@ -195,13 +223,18 @@ if __name__ == "__main__":
         'c_loss_unique_n': [],
         'MI_loss': []
     }
+    triplet_loss = nn.TripletMarginLoss(margin=3.0, p=2, eps=1e-7)
     for epoch in range(parameters_dict['num_epochs']):
         #enable train mode
         glob_models = enable_mode(glob_models, mode='train')
         for modality in modalities:
-            local_models[modality] = enable_mode(local_models[modality], mode='train')
-        all_batch_losses_train = train_one_epoch(trainloader, modalities, glob_optimizer, local_optimizers, glob_models, local_models,
-                    mse_loss, contrastive_loss_criterion, mutual_information, mode='train')
+            local_models_neg[modality] = enable_mode(local_models_neg[modality], mode='train')
+            local_models_pos[modality] = enable_mode(local_models_pos[modality], mode='train')
+
+        all_batch_losses_train = train_one_epoch(trainloader, modalities,
+                                                 glob_optimizer, local_optimizers_neg, local_optimizers_pos,
+                                                 glob_models, local_models_neg, local_models_pos,
+                    mse_loss, triplet_loss, mutual_information, mode='train')
 
         # add losses
         for loss_key in list(all_batch_losses_train.keys()):
@@ -210,10 +243,13 @@ if __name__ == "__main__":
         # enable test mode
         glob_models = enable_mode(glob_models, mode='test')
         for modality in modalities:
-            local_models[modality] = enable_mode(local_models[modality], mode='test')
-        all_batch_losses_test = train_one_epoch(testloader, modalities, glob_optimizer, local_optimizers,
-                                                 glob_models, local_models,
-                                                 mse_loss, contrastive_loss_criterion, mutual_information, mode='test')
+            local_models_neg[modality] = enable_mode(local_models_neg[modality], mode='test')
+            local_models_pos[modality] = enable_mode(local_models_pos[modality], mode='test')
+
+        all_batch_losses_test = train_one_epoch(testloader, modalities,
+                                                glob_optimizer, local_optimizers_neg, local_optimizers_pos,
+                                                 glob_models, local_models_neg, local_models_pos,
+                                                 mse_loss, triplet_loss, mutual_information, mode='test')
 
         # add losses
         for loss_key in list(all_batch_losses_test.keys()):
@@ -250,7 +286,7 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
-    save_models(glob_models, local_models, save_dir)
+    save_models(glob_models, local_models_neg, local_models_pos, save_dir)
 
     for m in range(len(list(losses_train.keys()))):
         key = list(losses_train.keys())[m]

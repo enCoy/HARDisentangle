@@ -26,8 +26,8 @@ def get_parameters(data_name):
     parameters_dict['sampling_rate'] = 50 # hz
     parameters_dict['sliding_window_overlap_ratio'] = 0.5
     parameters_dict['num_epochs'] = 300
-    parameters_dict['batch_size'] = 128
-    parameters_dict['lr'] = 0.003
+    parameters_dict['batch_size'] = 64
+    parameters_dict['lr'] = 0.01
     parameters_dict['embedding_dim'] = 128
     parameters_dict['weight_decay'] = 1e-6
     parameters_dict['use_bidirectional'] = False

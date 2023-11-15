@@ -1,5 +1,8 @@
-# in this one, positive and negative representation encoders will be removed
-# positive and negative samples will be fed directly
+"""
+
+In this one we will not have pretrained positive and negative representation generators
+"""
+
 
 import numpy as np
 import os
@@ -7,7 +10,7 @@ from DataProcesses import DataProcessor
 from Utils.HelperFunctions import  convert_to_torch, plot_loss_curves
 from CommonInformation.Models.CommonNetModels import CNNBaseNet
 from CommonInformation.Models.LSTMAE import LSTM_AE
-from CommonInformation.Models.CommonNetModels import train_one_epoch_v2
+from CommonInformation.Models.CommonNetModels import train_one_epoch
 from Models.CommonNetModels import FuseNet, CommonNet, UniqueNet, ReconstructNet, Mine
 import warnings
 from time import localtime, strftime
@@ -61,11 +64,6 @@ if __name__ == "__main__":
         feature_dim = 6
     parameters_dict = get_parameters(data_name)
 
-
-    positive_representation_model_path = os.path.join(BASE_DIR, r"CommonInformation\PositiveSampleGenerator\pamap2\2023-11-02_07-47-04_Subject3")
-    negative_representation_model_path = os.path.join(BASE_DIR, r"CommonInformation\NegativeSampleGenerator\pamap2\2023-11-02_05-50-32_Subject3")
-
-
     data_processor = DataProcessor(data_dir=parameters_dict['data_dir'],
                                    data_name=data_name,
                                    target_subject_num=target_subject,
@@ -92,9 +90,9 @@ if __name__ == "__main__":
                        num_time_steps=parameters_dict['window_size'])
 
     # initialize with the same seed to ensure that they start from the same place
-    # torch.manual_seed(parameters_dict['common_unique_shared_seed'])
+    torch.manual_seed(parameters_dict['common_unique_shared_seed'])
     unique_net = UniqueNet(1024, 256, parameters_dict['embedding_dim'])
-    # torch.manual_seed(parameters_dict['common_unique_shared_seed'])
+    torch.manual_seed(parameters_dict['common_unique_shared_seed'])
     common_net = CommonNet(1024, 256, parameters_dict['embedding_dim'])
     reconstruct_net = ReconstructNet(parameters_dict['embedding_dim'] * 2, 256,
                                      parameters_dict['window_size'] * feature_dim)
@@ -142,7 +140,7 @@ if __name__ == "__main__":
         #enable train mode
         for model in all_models:
             model.train()
-        all_batch_losses_train = train_one_epoch_v2(trainloader, optimizer, fuse_net, mine,
+        all_batch_losses_train = train_one_epoch(trainloader, optimizer, fuse_net, mine,
                         mse_loss, contrastive_loss_criterion, mutual_information, mode='train')
         # add losses
         for loss_key in list(all_batch_losses_train.keys()):
@@ -151,7 +149,7 @@ if __name__ == "__main__":
         # enable test mode
         for model in all_models:
             model.eval()
-        all_batch_losses_test = train_one_epoch_v2(testloader, optimizer, fuse_net, mine,
+        all_batch_losses_test = train_one_epoch(testloader, optimizer, fuse_net, mine,
                                            mse_loss, contrastive_loss_criterion, mutual_information, mode='test')
         # add losses
         for loss_key in list(all_batch_losses_test.keys()):
@@ -160,13 +158,26 @@ if __name__ == "__main__":
         epoch_train_loss = np.mean(np.array(all_batch_losses_train['total_loss']))
         epoch_test_loss = np.mean(np.array(all_batch_losses_test['total_loss']))
 
-        epoch_c_common_n_train =  np.mean(np.array(all_batch_losses_train['c_loss_common_n']))
-        epoch_c_unique_p_train =  np.mean(np.array(all_batch_losses_train['c_loss_unique_p']))
-        epoch_c_common_n_test =  np.mean(np.array(all_batch_losses_test['c_loss_common_n']))
-        epoch_c_unique_p_test =  np.mean(np.array(all_batch_losses_test['c_loss_unique_p']))
+        epoch_reconst_loss_train = np.mean(np.array(all_batch_losses_train['reconstruction_loss']))
+        epoch_reconst_loss_test = np.mean(np.array(all_batch_losses_test['reconstruction_loss']))
+        epoch_c_common_n_train = np.mean(np.array(all_batch_losses_train['c_loss_common_n']))
+        epoch_c_common_n_test = np.mean(np.array(all_batch_losses_test['c_loss_common_n']))
+        epoch_c_common_p_train = np.mean(np.array(all_batch_losses_train['c_loss_common_p']))
+        epoch_c_common_p_test = np.mean(np.array(all_batch_losses_test['c_loss_common_p']))
+        epoch_c_unique_n_train = np.mean(np.array(all_batch_losses_train['c_loss_unique_n']))
+        epoch_c_unique_n_test = np.mean(np.array(all_batch_losses_test['c_loss_unique_n']))
+        epoch_c_unique_p_train = np.mean(np.array(all_batch_losses_train['c_loss_unique_p']))
+        epoch_c_unique_p_test = np.mean(np.array(all_batch_losses_test['c_loss_unique_p']))
+        mutual_info_loss_train = np.mean(np.array(all_batch_losses_train['MI_loss']))
+        mutual_info_loss_test = np.mean(np.array(all_batch_losses_test['MI_loss']))
+
         print(f'Epoch {epoch}: Train loss: {epoch_train_loss} Test: {epoch_test_loss}')
+        print(f'Epoch {epoch}: Train reconst loss: {epoch_reconst_loss_train} Test: {epoch_reconst_loss_test}')
+        print(f'Epoch {epoch}: Train C-common-p: {epoch_c_common_p_train} Test: {epoch_c_common_p_test}')
         print(f'Epoch {epoch}: Train C-common-n: {epoch_c_common_n_train} Test: {epoch_c_common_n_test}')
         print(f'Epoch {epoch}: Train C-unique-p: {epoch_c_unique_p_train} Test: {epoch_c_unique_p_test}')
+        print(f'Epoch {epoch}: Train C-unique-n: {epoch_c_unique_n_train} Test: {epoch_c_unique_n_test}')
+        print(f'Epoch {epoch}: Train MI Loss: {mutual_info_loss_train} Test: {mutual_info_loss_test}')
         print()
 
     timestring = strftime("%Y-%m-%d_%H-%M-%S", localtime()) + "_Subject%s" % str(

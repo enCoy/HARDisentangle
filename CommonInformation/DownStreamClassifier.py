@@ -50,10 +50,10 @@ if __name__ == "__main__":
     testloader = Data.DataLoader(dataset=testset, batch_size=parameters_dict['batch_size'],
                                  shuffle=False, num_workers=0, drop_last=True)
 
-    model_dir = os.path.join(BASE_DIR, r"CommonInformation\FuseNet\pamap2\2023-11-04_00-20-13_Subject3")
+    model_dir = os.path.join(BASE_DIR, r"CommonInformation\FuseNet\pamap2\2023-11-05_23-11-28_Subject3")
     base_net = CNNBaseNet(input_dim=input_size, output_channels=128, embedding=1024,
                        num_time_steps=parameters_dict['window_size'])
-    common_net = CommonNet(1024, 256, parameters_dict['embedding_dim'])
+    common_net = CommonNet(1024, 1024, parameters_dict['embedding_dim'])
     classification_net = ClassifierNet(common_rep_dim=parameters_dict['embedding_dim'], hidden_1=1024, output_dim=parameters_dict['num_activities'])
 
     base_net.load_state_dict(torch.load(os.path.join(model_dir, 'base_net_stateDict.pth')))
@@ -62,8 +62,10 @@ if __name__ == "__main__":
 
     # freeze these two
     for param in base_net.parameters():
+        print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
         param.requires_grad = False
     for param in common_net.parameters():
+        print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
         param.requires_grad = False
 
     all_models = [base_net, common_net, classification_net]

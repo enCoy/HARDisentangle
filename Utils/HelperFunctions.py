@@ -142,6 +142,28 @@ def convert_to_torch(train_X, train_y, test_X, test_y):
     print("Test y shape: ", test_y.size())
     return train_X, train_y, test_X, test_y
 
+def convert_to_torch_v2(train_X, train_y, test_X, test_y):
+    # train X
+    shape = train_X.shape  # 4 dimensional
+    train_X = torch.from_numpy(np.reshape(train_X.astype(float), [shape[0], shape[1], shape[2], shape[3]]))
+    train_X = train_X.type(torch.FloatTensor).cuda()
+    # train Y
+    train_y = torch.from_numpy(train_y)
+    train_y = train_y.type(torch.FloatTensor).cuda()
+    # test X
+    shape = test_X.shape
+    test_X = torch.from_numpy(np.reshape(test_X.astype(float), [shape[0], shape[1], shape[2], shape[3]]))
+    test_X = test_X.type(torch.FloatTensor).cuda()
+    # test y
+    test_y = torch.from_numpy(test_y.astype(np.float32))
+    test_y = test_y.type(torch.FloatTensor).cuda()
+    print("Shapes after converting to torch:")
+    print(f"Train x shape: ", train_X.size())
+    print(f"Train y shape: ", train_y.size())
+    print(f"Test x shape: ", test_X.size())
+    print(f"Test y shape: ", test_y.size())
+    return train_X, train_y, test_X, test_y
+
 def plot_loss_curves(train_loss, test_loss, save_loc=None, show_fig=True, title='Loss Curve'):
     epochs = np.arange(len(train_loss)) + 1
     plot_single_continuous_plot(epochs, train_loss, title, 'Epoch', 'Loss', color='tab:red', label='train')
@@ -157,7 +179,7 @@ def convert_win_path(win_path):
 
 
 # custom loss functions
-def contrastive_loss_criterion(x1, x2, label, margin: float = 7):
+def contrastive_loss_criterion(x1, x2, label, margin: float = 3):
     """
     Computes Contrastive Loss
     """
