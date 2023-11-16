@@ -9,10 +9,10 @@ class ClassifierNet(nn.Module):
         self.common_rep_dim = common_rep_dim
         self.output_dim = output_dim
         self.fc = nn.Sequential(nn.Linear(self.common_rep_dim, hidden_1),
-                                nn.BatchNorm1d(hidden_1),
+                                # nn.BatchNorm1d(hidden_1),
                                 nn.ReLU(),
                                 nn.Linear(hidden_1, hidden_1),
-                                nn.BatchNorm1d(hidden_1),
+                                # nn.BatchNorm1d(hidden_1),
                                 nn.ReLU(),
                                 nn.Linear(hidden_1, self.output_dim))
         self.train_on_gpu = train_on_gpu

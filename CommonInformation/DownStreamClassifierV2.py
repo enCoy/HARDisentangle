@@ -69,31 +69,31 @@ if __name__ == "__main__":
     num_modalities = parameters_dict['num_modalities']
     modalities = data_processor.modalities
     # create as many models as modalities
-    model_dir = os.path.join(BASE_DIR, r"CommonInformation\FuseNet\pamap2\2023-11-13_23-43-16_Subject3")
+    model_dir = os.path.join(BASE_DIR, r"CommonInformation\FuseNet\pamap2\2023-11-15_02-35-17_Subject3")
     models = {}
     for modality in modalities:
         models[modality] = {}
     for modality in modalities:
-        models[modality]['base'] = CNNBaseNet(input_dim=input_size, output_channels=128, embedding=512,
+        models[modality]['base'] = CNNBaseNet(input_dim=input_size, output_channels=128, embedding=1024,
                        num_time_steps=parameters_dict['window_size'])
-        models[modality]['common'] =  CommonNet(512, 256, parameters_dict['embedding_dim'])
+        models[modality]['common'] =  CommonNet(1024, 256, parameters_dict['embedding_dim'])
         models[modality]['classification'] = ClassifierNet(common_rep_dim=parameters_dict['embedding_dim'],
                                                            hidden_1=1024, output_dim=parameters_dict['num_activities'])
 
         # load trained models
-        # models[modality]['base'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_base_stateDict.pth')))
-        # models[modality]['common'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_common_stateDict.pth')))
+        models[modality]['base'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_base_stateDict.pth')))
+        models[modality]['common'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_common_stateDict.pth')))
 
 
-        # # freeze these two if you wish
-        # for param in models[modality]['base'].parameters():
-        #     print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
-        #     print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
-        #     param.requires_grad = False
-        # for param in models[modality]['common'].parameters():
-        #     print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
-        #     print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
-        #     param.requires_grad = False
+        # freeze these two if you wish
+        for param in models[modality]['base'].parameters():
+            print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
+            print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
+            param.requires_grad = False
+        for param in models[modality]['common'].parameters():
+            print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
+            print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
+            param.requires_grad = False
 
     models_to_push = ['base', 'common', 'classification']
     for modality in modalities:
@@ -104,10 +104,10 @@ if __name__ == "__main__":
     criterion = torch.nn.CrossEntropyLoss()
     optimizers = {}
     for modality in modalities:
-        optimizers[modality] = torch.optim.Adam(list(models[modality]['classification'].parameters()) +
+        optimizers[modality] = torch.optim.SGD(list(models[modality]['classification'].parameters()) +
                                  list(models[modality]['common'].parameters()) +
                                  list(models[modality]['base'].parameters()),
-                                 lr=parameters_dict['lr'], weight_decay=parameters_dict['weight_decay'])
+                                 lr=parameters_dict['lr'], weight_decay=parameters_dict['weight_decay'], momentum=0.9)
 
 
     test_results = []
@@ -143,8 +143,13 @@ if __name__ == "__main__":
         fused_predictions = fuse_predictions_from_multiple_modalities(all_predictions_test, modalities, parameters_dict['num_activities'])
 
         # performance metrics
-        print("fused predictions unique: ", np.unique(fused_predictions))
-        print("gt unique: ", np.unique(all_ground_truth_test[modalities[0]]))
+        unique, counts = np.unique(fused_predictions, return_counts=True)
+        gt_unique, gt_counts = np.unique(all_ground_truth_test[modalities[0]], return_counts=True)
+        print("fused predictions unique: ", unique)
+        print("counts: ", counts)
+        print("gt unique: ", gt_unique)
+        print("gt counts: ", gt_counts)
+
         f1_test = metrics.f1_score(all_ground_truth_test[modalities[0]], fused_predictions, average='macro')
         acc_test = metrics.accuracy_score(all_ground_truth_test[modalities[0]], fused_predictions)
         test_results.append([acc_test, f1_test, epoch + 1])

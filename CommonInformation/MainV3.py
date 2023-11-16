@@ -31,10 +31,10 @@ def get_parameters(data_name):
     parameters_dict['window_size'] = 50  # 50 hz = 1 sec
     parameters_dict['sampling_rate'] = 50 # hz
     parameters_dict['sliding_window_overlap_ratio'] = 0.5
-    parameters_dict['num_epochs'] = 50
-    parameters_dict['batch_size'] = 64
-    parameters_dict['lr'] = 0.0003
-    parameters_dict['embedding_dim'] = 256
+    parameters_dict['num_epochs'] = 2
+    parameters_dict['batch_size'] = 256
+    parameters_dict['lr'] = 0.00003
+    parameters_dict['embedding_dim'] = 128
     parameters_dict['weight_decay'] = 1e-6
     parameters_dict['use_bidirectional'] = False
     parameters_dict['num_lstm_layers'] = 2
@@ -54,7 +54,7 @@ def get_parameters(data_name):
         print("Error! Data does not exist!!")
     return parameters_dict
 
-def get_models(parameters_dict):
+def get_models(parameters_dict, disentangle_reconst=True):
     models = {}
     torch.manual_seed(parameters_dict['common_unique_shared_seed'])
     base_net = CNNBaseNet(input_dim=feature_dim, output_channels=128, embedding=1024,
@@ -65,8 +65,12 @@ def get_models(parameters_dict):
     torch.manual_seed(parameters_dict['common_unique_shared_seed'])
     common_net = CommonNet(1024, 256, parameters_dict['embedding_dim'])
     torch.manual_seed(parameters_dict['common_unique_shared_seed'])
-    reconstruct_net = ReconstructNet(parameters_dict['embedding_dim'] * 2, 256,
-                                     parameters_dict['window_size'] * feature_dim)
+    if disentangle_reconst:
+        reconstruct_net = ReconstructNet(parameters_dict['embedding_dim'] * 2, 256,
+                                         parameters_dict['window_size'] * feature_dim)
+    else:
+        reconstruct_net = ReconstructNet(parameters_dict['embedding_dim'], 256,
+                                         parameters_dict['window_size'] * feature_dim)
     fuse_net = FuseNet(base_net, common_net, unique_net,
                        reconstruct_net, feature_dim,
                        window_num=parameters_dict['window_size'])
@@ -156,8 +160,8 @@ if __name__ == "__main__":
     local_models_neg = {}
     local_models_pos = {}
     for modality in modalities:
-        local_neg = get_models(parameters_dict)
-        local_pos = get_models(parameters_dict)
+        local_neg = get_models(parameters_dict, disentangle_reconst=False)
+        local_pos = get_models(parameters_dict, disentangle_reconst=False)
         local_models_neg[modality] = local_neg
         local_models_pos[modality] = local_pos
 
@@ -166,13 +170,14 @@ if __name__ == "__main__":
     for model_name in glob_models_to_push:
         if glob_models[model_name].train_on_gpu:
             glob_models[model_name].cuda()
-    local_models_to_push = ['base', 'unique', 'reconst', 'fuse']
+    local_models_to_push_neg = ['base', 'unique', 'reconst', 'fuse']
+    local_models_to_push_pos = ['base', 'common', 'reconst', 'fuse']
+
     for modality in modalities:
-        for model_name in local_models_to_push:
-            print("modality: ", modality)
-            print("model name:", model_name)
+        for model_name in local_models_to_push_neg:
             if local_models_neg[modality][model_name].train_on_gpu:
                 local_models_neg[modality][model_name].cuda()
+        for model_name in local_models_to_push_pos:
             if local_models_pos[modality][model_name].train_on_gpu:
                 local_models_pos[modality][model_name].cuda()
 
@@ -192,7 +197,7 @@ if __name__ == "__main__":
                                   + list(local_models_neg[modality]['reconst'].parameters()),
                                  lr=parameters_dict['lr'], weight_decay=parameters_dict['weight_decay'])
         local_optimizers_pos[modality] = torch.optim.Adam(list(local_models_pos[modality]['base'].parameters())
-                                                          + list(local_models_pos[modality]['unique'].parameters())
+                                                          + list(local_models_pos[modality]['common'].parameters())
                                                           + list(local_models_pos[modality]['reconst'].parameters()),
                                                           lr=parameters_dict['lr'],
                                                           weight_decay=parameters_dict['weight_decay'])
@@ -207,23 +212,19 @@ if __name__ == "__main__":
     losses_train = {
         'total_loss': [],
         'reconstruction_loss': [],
-        'c_loss_common_p': [],
-        'c_loss_common_n': [],
-        'c_loss_unique_p': [],
-        'c_loss_unique_n': [],
+        'common_and_positive': [],
+        'unique_and_negative': [],
         'MI_loss': []
     }
 
     losses_test = {
         'total_loss': [],
         'reconstruction_loss': [],
-        'c_loss_common_p': [],
-        'c_loss_common_n': [],
-        'c_loss_unique_p': [],
-        'c_loss_unique_n': [],
+        'common_and_positive': [],
+        'unique_and_negative': [],
         'MI_loss': []
     }
-    triplet_loss = nn.TripletMarginLoss(margin=3.0, p=2, eps=1e-7)
+    triplet_loss = nn.TripletMarginLoss(margin=0.5, p=2, eps=1e-7)
     for epoch in range(parameters_dict['num_epochs']):
         #enable train mode
         glob_models = enable_mode(glob_models, mode='train')

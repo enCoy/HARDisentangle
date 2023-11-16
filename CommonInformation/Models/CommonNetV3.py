@@ -170,16 +170,23 @@ def train_one_epoch(loader, modalities, glob_optimizer, local_optimizers_neg, lo
                 # local pass first
                 local_optimizers_neg[modality].zero_grad()
                 local_optimizers_pos[modality].zero_grad()
-                local_loss_neg, negative_repr = local_net_forward_pass(input_modality, target_modality, local_models_neg[modality]['fuse'], mse_loss, net_type='neg')
-                local_loss_pos, positive_repr = local_net_forward_pass(input_modality, target_modality, local_models_pos[modality]['fuse'], mse_loss, net_type='pos')
+                local_loss_neg, negative_repr = local_net_forward_pass(input_modality, target_modality,
+                                                                       local_models_neg[modality]['base'], local_models_neg[modality]['unique'],
+                                                                       local_models_neg[modality]['reconst'],
+                                                                       mse_loss)
+                local_loss_pos, positive_repr = local_net_forward_pass(input_modality, target_modality,
+                                                                       local_models_pos[modality]['base'], local_models_pos[modality]['common'],
+                                                                       local_models_pos[modality]['reconst'],
+                                                                       mse_loss)
                 local_loss_neg.backward(retain_graph=True)
                 local_loss_pos.backward(retain_graph=True)
                 local_optimizers_neg[modality].step()
                 local_optimizers_pos[modality].step()
                 # global network pass
                 glob_optimizer.zero_grad()
-                total_loss, batch_losses = glob_net_forward_pass(input_modality, target_modality, negative_repr, positive_repr, glob_models['fuse'], glob_models['mine'],
-                                      mse_loss, contrastive_loss, mi_estimator, batch_losses)
+                total_loss, batch_losses = glob_net_forward_pass(input_modality, target_modality, negative_repr, positive_repr,
+                                                                 glob_models['fuse'], glob_models['mine'],
+                                                        mse_loss, contrastive_loss, mi_estimator, batch_losses)
                 total_loss.backward()
                 glob_optimizer.step()
         print("common net")
@@ -198,8 +205,14 @@ def train_one_epoch(loader, modalities, glob_optimizer, local_optimizers_neg, lo
                     modality = modalities[modality_idx]
                     input_modality = torch.squeeze(inputs_list[modality_idx])
                     target_modality = torch.squeeze(targets_list[modality_idx])
-                    local_loss_neg, negative_repr = local_net_forward_pass(input_modality, target_modality, local_models_neg[modality]['fuse'], mse_loss)
-                    local_loss_pos, positive_repr = local_net_forward_pass(input_modality, target_modality, local_models_pos[modality]['fuse'], mse_loss)
+                    local_loss_neg, negative_repr = local_net_forward_pass(input_modality, target_modality,
+                                                                           local_models_neg[modality]['base'],
+                                                                           local_models_neg[modality]['unique'],
+                                                                           local_models_neg[modality]['reconst'], mse_loss)
+                    local_loss_pos, positive_repr = local_net_forward_pass(input_modality, target_modality,
+                                                                           local_models_pos[modality]['base'],
+                                                                           local_models_pos[modality]['common'],
+                                                                           local_models_pos[modality]['reconst'], mse_loss)
                     total_loss, batch_losses = glob_net_forward_pass(input_modality, target_modality, negative_repr, positive_repr,
                                                                      glob_models['fuse'], glob_models['mine'],
                                                                      mse_loss, contrastive_loss, mi_estimator,
@@ -207,16 +220,17 @@ def train_one_epoch(loader, modalities, glob_optimizer, local_optimizers_neg, lo
     return batch_losses
 
 
-def local_net_forward_pass(inputs, targets, fuse_net, mse_loss, net_type='neg'):
+def local_net_forward_pass(inputs, targets, base_net, encoding_net, reconst_net, mse_loss):
     # net_type = 'neg' or 'pos' --- positive or negative samples
     [_, _, samples] = np.split(inputs, 3, axis=-1)
     [_, _, target_samples] = np.split(targets, 3, axis=-1)
     samples, target_samples = samples.cuda(), target_samples.cuda()
 
-    if net_type == 'pos':
-        reconstructed, representation, _ = fuse_net(samples)
-    else:
-        reconstructed, _, representation = fuse_net(samples)
+    base_representation = base_net(samples)  # should be shaped (N x embedding_dim)
+    representation = encoding_net(base_representation)  # should be shaped (N x output_size)
+    reconstructed = reconst_net(representation)
+    # reshape reconstructed
+    reconstructed = torch.reshape(reconstructed, (-1, base_net.num_time_steps, base_net.input_dim))
     # input shape (N x NumWindows x feature_dim)
     # reconstruction
     reconstruction_loss = mse_loss(reconstructed, target_samples)
@@ -259,15 +273,6 @@ def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
     commonality_triplet_loss = contrastive_loss(common_representation_sm, positive_common_sm, neg_repr_sm)
     uniqueness_triplet_loss = contrastive_loss(unique_representation_sm, neg_repr_sm, positive_common_sm)
 
-
-    #
-    # c_loss_common_p = contrastive_loss(common_representation, positive_common, label=0)
-    # # we want common and negative_common to be dissimilar -i.e. common info of that window should be dissimilar to another window's common
-    # c_loss_common_n = contrastive_loss(common_representation, neg_repr, label=1)  # problematic
-    # # we want unique and positive unique to be dissimilar, i.e. unique info of that window
-    # c_loss_unique_p = contrastive_loss(unique_representation, positive_unique, label=1)  # problematic
-    # c_loss_unique_n = contrastive_loss(unique_representation, neg_repr, label=0)
-
     # mutual info
     # this is how several people sample marginal distribution
     unique_shuffled = torch.index_select(  # shuffles the noise
@@ -278,9 +283,8 @@ def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
     # biased estimate
     MI_loss = -mi_lb
 
-    lambda_reconst = 0.5
-    lambda_contrast_c = 1.0
-    lambda_contrast_u = 10.0
+    lambda_reconst = 0.2
+    lambda_contrast_c = 3.0
     lambda_MI = 0.001
 
 
@@ -289,21 +293,8 @@ def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
     # add batch losses
     batch_losses['total_loss'].append(total_loss_to_report.item())
     batch_losses['reconstruction_loss'].append(reconstruction_loss.detach().item())
-    batch_losses['c_loss_common_p'].append(commonality_triplet_loss.detach().item())
-    batch_losses['c_loss_common_n'].append(commonality_triplet_loss.detach().item())
-    batch_losses['c_loss_unique_p'].append(uniqueness_triplet_loss.detach().item())
-    batch_losses['c_loss_unique_n'].append(uniqueness_triplet_loss.detach().item())
+    batch_losses['common_and_positive'].append(commonality_triplet_loss.detach().item())
+    batch_losses['unique_and_negative'].append(uniqueness_triplet_loss.detach().item())
     batch_losses['MI_loss'].append(MI_loss.detach().item())
 
-    # total_loss = lambda_reconst * reconstruction_loss + lambda_contrast_c * (c_loss_common_p + c_loss_common_n) \
-    #              + lambda_contrast_u * (c_loss_unique_p + c_loss_unique_n) + lambda_MI * MI_loss
-    # total_loss_to_report = reconstruction_loss + c_loss_common_p + c_loss_common_n + c_loss_unique_p + c_loss_unique_n + MI_loss
-    # # add batch losses
-    # batch_losses['total_loss'].append(total_loss_to_report.item())
-    # batch_losses['reconstruction_loss'].append(reconstruction_loss.detach().item())
-    # batch_losses['c_loss_common_p'].append(c_loss_common_p.detach().item())
-    # batch_losses['c_loss_common_n'].append(c_loss_common_n.detach().item())
-    # batch_losses['c_loss_unique_p'].append(c_loss_unique_p.detach().item())
-    # batch_losses['c_loss_unique_n'].append(c_loss_unique_n.detach().item())
-    # batch_losses['MI_loss'].append(MI_loss.detach().item())
     return total_loss, batch_losses
