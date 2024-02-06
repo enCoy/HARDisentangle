@@ -2,6 +2,8 @@ import torch.nn as nn
 import torch
 import numpy as np
 
+# only one global model for classification but modalities are processed differently
+
 
 class ClassifierNet(nn.Module):
     def __init__(self, common_rep_dim, hidden_1, output_dim, train_on_gpu=True):
@@ -40,7 +42,7 @@ def train_one_epoch(loader, optimizers, models, criterion, modalities, mode):
                 optimizers[modality].zero_grad()
                 # get the inputs; data is a list of [inputs, labels]
                 modality_loss, all_ground_truth[modality], all_predictions[modality], all_prediction_confidences[modality] = forward_pass(input_modality, targets,
-                                                                       models[modality]['base'], models[modality]['common'], models[modality]['classification'],
+                                                                       models['base'], models['common'], models['classification'],
                                                                        criterion, all_ground_truth[modality], all_predictions[modality], all_prediction_confidences[modality])
                 modality_loss.backward()
                 optimizers[modality].step()
@@ -54,7 +56,7 @@ def train_one_epoch(loader, optimizers, models, criterion, modalities, mode):
                 input_modality = torch.squeeze(inputs_list[modality_idx])
                 # get the inputs; data is a list of [inputs, labels]
                 modality_loss, all_ground_truth[modality], all_predictions[modality], all_prediction_confidences[modality] = forward_pass(input_modality, targets,
-                                                                       models[modality]['base'], models[modality]['common'], models[modality]['classification'],
+                                                                       models['base'], models['common'], models['classification'],
                                                                        criterion, all_ground_truth[modality], all_predictions[modality], all_prediction_confidences[modality])
                 batch_losses[modality].append(modality_loss.detach().item())
 

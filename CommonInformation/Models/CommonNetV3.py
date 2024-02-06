@@ -49,8 +49,9 @@ class CNNBaseNet(nn.Module):
         # encoder
         x = self.cnn(x)  # shape (batch_size, channel_size, some_math_here, 1)
         x = x.reshape(x.size(0), -1)  # flatten
-        x = self.fc(x)  # batch_size x embedding
-        return F.relu(x)
+        return x
+        # x = self.fc(x)  # batch_size x embedding
+        # return F.relu(x)
 
 
 class CommonNet(nn.Module):
@@ -58,11 +59,11 @@ class CommonNet(nn.Module):
         super(CommonNet, self).__init__()
         self.embedding_dim = embedding_dim
         self.fc = nn.Sequential(
-                            nn.Linear(self.embedding_dim, hidden_2),
-                            # nn.BatchNorm1d(hidden_1),
-                            # nn.ReLU(),
-                            # nn.Linear(hidden_1, hidden_2),
-                            # nn.BatchNorm1d(hidden_2),
+                            nn.Linear(self.embedding_dim, hidden_1),
+                            nn.BatchNorm1d(hidden_1),
+                            nn.ReLU(),
+                            nn.Linear(hidden_1, hidden_2),
+                            nn.BatchNorm1d(hidden_2),
                             nn.ReLU()
 
         )
@@ -91,11 +92,11 @@ class UniqueNet(nn.Module):
         super(UniqueNet, self).__init__()
         self.embedding_dim = embedding_dim
         self.fc = nn.Sequential(
-            nn.Linear(self.embedding_dim, hidden_2),
-            # nn.BatchNorm1d(hidden_1),
-            # nn.ReLU(),
-            # nn.Linear(hidden_1, hidden_2),
-            # nn.BatchNorm1d(hidden_2),
+            nn.Linear(self.embedding_dim, hidden_1),
+            nn.BatchNorm1d(hidden_1),
+            nn.ReLU(),
+            nn.Linear(hidden_1, hidden_2),
+            nn.BatchNorm1d(hidden_2),
             nn.ReLU()
         )
         self.train_on_gpu = train_on_gpu
@@ -130,12 +131,8 @@ class FuseNet(nn.Module):
 class Mine(nn.Module):
     def __init__(self, x_dim, z_dim, hidden_dim, train_on_gpu = True):
         super(Mine, self).__init__()
-        self.fcx = nn.Sequential(nn.Linear(x_dim, hidden_dim),
-                                       nn.ReLU(),
-                                       nn.Linear(hidden_dim, hidden_dim // 4),)
-        self.fcz = nn.Sequential(nn.Linear(z_dim, hidden_dim),
-                                       nn.ReLU(),
-                                       nn.Linear(hidden_dim, hidden_dim // 4))
+        self.fcx = nn.Sequential(nn.Linear(x_dim, hidden_dim // 4))
+        self.fcz = nn.Sequential(nn.Linear(z_dim, hidden_dim // 4))
         self.fc = nn.Linear(hidden_dim // 4, 1)
         self.train_on_gpu = train_on_gpu
 
@@ -151,10 +148,8 @@ def train_one_epoch(loader, modalities, glob_optimizer, local_optimizers_neg, lo
     # version without positive and negative representations
     batch_losses = {'total_loss': [],
         'reconstruction_loss': [],
-        'c_loss_common_p': [],
-        'c_loss_common_n': [],
-        'c_loss_unique_p': [],
-        'c_loss_unique_n': [],
+        'common_and_positive': [],
+        'unique_and_negative': [],
         'MI_loss': []}
 
     if mode == 'train':
@@ -220,10 +215,14 @@ def train_one_epoch(loader, modalities, glob_optimizer, local_optimizers_neg, lo
     return batch_losses
 
 
-def local_net_forward_pass(inputs, targets, base_net, encoding_net, reconst_net, mse_loss):
+def local_net_forward_pass(inputs, targets, base_net, encoding_net, reconst_net, mse_loss, net_type='pos'):
     # net_type = 'neg' or 'pos' --- positive or negative samples
-    [_, _, samples] = np.split(inputs, 3, axis=-1)
-    [_, _, target_samples] = np.split(targets, 3, axis=-1)
+    if net_type == 'pos':
+        [_, samples, _] = np.split(inputs, 3, axis=-1)
+        [_, target_samples, _] = np.split(targets, 3, axis=-1)
+    else:  # neg
+        [_, _, samples] = np.split(inputs, 3, axis=-1)
+        [_, _, target_samples] = np.split(targets, 3, axis=-1)
     samples, target_samples = samples.cuda(), target_samples.cuda()
 
     base_representation = base_net(samples)  # should be shaped (N x embedding_dim)
@@ -239,9 +238,9 @@ def local_net_forward_pass(inputs, targets, base_net, encoding_net, reconst_net,
 
 def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
                  mse_loss, contrastive_loss, mi_estimator, batch_losses):
-    [inputs, positives, _] = np.split(inputs, 3, axis=-1)
-    [outputs, pos_out, _] = np.split(targets, 3, axis=-1)
-    inputs, positives, outputs, pos_out = inputs.cuda(), positives.cuda(), outputs.cuda(), pos_out.cuda()
+    [inputs, _, _] = np.split(inputs, 3, axis=-1)
+    [outputs, _, _] = np.split(targets, 3, axis=-1)
+    inputs, outputs = inputs.cuda(), outputs.cuda()
     # softmax_layer = nn.Softmax(dim=1)
 
     # anchor signal
@@ -251,10 +250,6 @@ def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
     # negative_common = neg_repr-positive_common
     # negative_unique = neg_repr-positive_unique
     # neg_repr = neg_repr - positive_common
-    # for common representation - positives are positives - negatives are negatives
-    # for unique representation - vice versa
-    # calculate losses
-    # reconstruction
     reconstruction_loss = mse_loss(reconstructed, outputs)
     # contrastive
     # we want common and positive_common to be similar
@@ -263,7 +258,7 @@ def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
     # positive_common_sm = softmax_layer(positive_common)
     # neg_repr_sm = softmax_layer(neg_repr - positive_common)
     # unique_representation_sm = softmax_layer(unique_representation)
-
+    neg_repr = neg_repr
     common_representation_sm = l2_norm(common_representation)
     positive_common_sm = l2_norm(pos_repr)
     neg_repr_sm = l2_norm(neg_repr)
@@ -273,6 +268,9 @@ def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
     commonality_triplet_loss = contrastive_loss(common_representation_sm, positive_common_sm, neg_repr_sm)
     uniqueness_triplet_loss = contrastive_loss(unique_representation_sm, neg_repr_sm, positive_common_sm)
 
+    # commonality_triplet_loss = contrastive_loss(common_representation_sm, positive_common_sm, neg_repr_sm)
+    # uniqueness_triplet_loss = contrastive_loss(unique_representation_sm, neg_repr_sm, positive_common_sm)
+
     # mutual info
     # this is how several people sample marginal distribution
     unique_shuffled = torch.index_select(  # shuffles the noise
@@ -281,20 +279,23 @@ def glob_net_forward_pass(inputs, targets, neg_repr, pos_repr, fuse_net, mine,
     # source: https://github.com/sungyubkim/MINE-Mutual-Information-Neural-Estimation-/blob/master/MINE.ipynb
     mi_lb, joint, et = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
     # biased estimate
-    MI_loss = -mi_lb
+    MI_loss = 0
 
     lambda_reconst = 0.2
-    lambda_contrast_c = 3.0
-    lambda_MI = 0.001
+    lambda_contrast_c = 2.0
+    lambda_MI = 0.1
 
-
-    total_loss = lambda_reconst*reconstruction_loss + lambda_contrast_c*(commonality_triplet_loss + uniqueness_triplet_loss) + lambda_MI*MI_loss
-    total_loss_to_report = reconstruction_loss + commonality_triplet_loss + uniqueness_triplet_loss + MI_loss
+    # if torch.isnan(MI_loss):
+    total_loss = lambda_reconst * reconstruction_loss + lambda_contrast_c * (
+                    commonality_triplet_loss + uniqueness_triplet_loss)
+    # else:
+    #     total_loss = lambda_reconst*reconstruction_loss + lambda_contrast_c*(commonality_triplet_loss + uniqueness_triplet_loss) + lambda_MI*MI_loss
+    total_loss_to_report = reconstruction_loss + commonality_triplet_loss + uniqueness_triplet_loss
     # add batch losses
     batch_losses['total_loss'].append(total_loss_to_report.item())
     batch_losses['reconstruction_loss'].append(reconstruction_loss.detach().item())
     batch_losses['common_and_positive'].append(commonality_triplet_loss.detach().item())
     batch_losses['unique_and_negative'].append(uniqueness_triplet_loss.detach().item())
-    batch_losses['MI_loss'].append(MI_loss.detach().item())
-
+    # batch_losses['MI_loss'].append(MI_loss.detach().item())
+    batch_losses['MI_loss'].append(0)
     return total_loss, batch_losses

@@ -31,9 +31,9 @@ def get_parameters(data_name):
     parameters_dict['window_size'] = 50  # 50 hz = 1 sec
     parameters_dict['sampling_rate'] = 50 # hz
     parameters_dict['sliding_window_overlap_ratio'] = 0.5
-    parameters_dict['num_epochs'] = 2
+    parameters_dict['num_epochs'] = 1
     parameters_dict['batch_size'] = 256
-    parameters_dict['lr'] = 0.00003
+    parameters_dict['lr'] = 0.0005
     parameters_dict['embedding_dim'] = 128
     parameters_dict['weight_decay'] = 1e-6
     parameters_dict['use_bidirectional'] = False
@@ -212,16 +212,16 @@ if __name__ == "__main__":
     losses_train = {
         'total_loss': [],
         'reconstruction_loss': [],
-        'common_and_positive': [],
-        'unique_and_negative': [],
+        'commonality_triplet': [],
+        'uniqueness_triplet': [],
         'MI_loss': []
     }
 
     losses_test = {
         'total_loss': [],
         'reconstruction_loss': [],
-        'common_and_positive': [],
-        'unique_and_negative': [],
+        'commonality_triplet': [],
+        'uniqueness_triplet': [],
         'MI_loss': []
     }
     triplet_loss = nn.TripletMarginLoss(margin=0.5, p=2, eps=1e-7)
@@ -258,26 +258,19 @@ if __name__ == "__main__":
 
         epoch_train_loss = np.mean(np.array(all_batch_losses_train['total_loss']))
         epoch_test_loss = np.mean(np.array(all_batch_losses_test['total_loss']))
-
         epoch_reconst_loss_train = np.mean(np.array(all_batch_losses_train['reconstruction_loss']))
         epoch_reconst_loss_test = np.mean(np.array(all_batch_losses_test['reconstruction_loss']))
-        epoch_c_common_n_train = np.mean(np.array(all_batch_losses_train['c_loss_common_n']))
-        epoch_c_common_n_test = np.mean(np.array(all_batch_losses_test['c_loss_common_n']))
-        epoch_c_common_p_train = np.mean(np.array(all_batch_losses_train['c_loss_common_p']))
-        epoch_c_common_p_test = np.mean(np.array(all_batch_losses_test['c_loss_common_p']))
-        epoch_c_unique_n_train = np.mean(np.array(all_batch_losses_train['c_loss_unique_n']))
-        epoch_c_unique_n_test = np.mean(np.array(all_batch_losses_test['c_loss_unique_n']))
-        epoch_c_unique_p_train = np.mean(np.array(all_batch_losses_train['c_loss_unique_p']))
-        epoch_c_unique_p_test = np.mean(np.array(all_batch_losses_test['c_loss_unique_p']))
+        epoch_commonality_train = np.mean(np.array(all_batch_losses_train['commonality_triplet']))
+        epoch_commonality_test = np.mean(np.array(all_batch_losses_test['commonality_triplet']))
+        epoch_uniqueness_train = np.mean(np.array(all_batch_losses_train['uniqueness_triplet']))
+        epoch_uniqueness_test = np.mean(np.array(all_batch_losses_test['uniqueness_triplet']))
         mutual_info_loss_train = np.mean(np.array(all_batch_losses_train['MI_loss']))
         mutual_info_loss_test = np.mean(np.array(all_batch_losses_test['MI_loss']))
 
         print(f'Epoch {epoch}: Train loss: {epoch_train_loss} Test: {epoch_test_loss}')
         print(f'Epoch {epoch}: Train reconst loss: {epoch_reconst_loss_train} Test: {epoch_reconst_loss_test}')
-        print(f'Epoch {epoch}: Train C-common-p: {epoch_c_common_p_train} Test: {epoch_c_common_p_test}')
-        print(f'Epoch {epoch}: Train C-common-n: {epoch_c_common_n_train} Test: {epoch_c_common_n_test}')
-        print(f'Epoch {epoch}: Train C-unique-p: {epoch_c_unique_p_train} Test: {epoch_c_unique_p_test}')
-        print(f'Epoch {epoch}: Train C-unique-n: {epoch_c_unique_n_train} Test: {epoch_c_unique_n_test}')
+        print(f'Epoch {epoch}: Train commonality: {epoch_commonality_train} Test: {epoch_commonality_test}')
+        print(f'Epoch {epoch}: Train uniqueness: {epoch_uniqueness_train} Test: {epoch_uniqueness_test}')
         print(f'Epoch {epoch}: Train MI Loss: {mutual_info_loss_train} Test: {mutual_info_loss_test}')
         print()
 

@@ -1,4 +1,4 @@
-from CommonInformation.Models.Classifier import ClassifierNet, train_one_epoch
+from CommonInformation.Models.ClassifierV3 import ClassifierNet, train_one_epoch
 from CommonInformation.Models.CommonNetV3 import CNNBaseNet, CommonNet
 from CommonInformation.MainV3 import get_parameters, enable_mode
 from CommonInformation.DataProcesses import DataProcessor
@@ -14,6 +14,10 @@ from Utils.Visualizers import plot_confusion_matrix
 from sklearn.metrics import confusion_matrix
 from matplotlib import pyplot as plt
 
+"""
+Only one global model for classification
+"""
+
 if __name__ == "__main__":
 
     machine = 'windows'
@@ -23,7 +27,7 @@ if __name__ == "__main__":
         base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
 
     data_name = 'pamap2'  # 'pamap2' or 'real'
-    target_subject = 3
+    target_subject = 4
     parameters_dict = get_parameters(data_name)
     fusion_mode = 'majority_vote'  # 'max_confidence, 'confidence_weighted', 'majority_vote
 
@@ -60,45 +64,42 @@ if __name__ == "__main__":
     num_modalities = parameters_dict['num_modalities']
     modalities = data_processor.modalities
     # create as many models as modalities
-    model_dir = os.path.join(BASE_DIR, r"CommonInformation\FuseNet\pamap2\2023-11-25_14-40-54_Subject3")
+    model_dir = os.path.join(BASE_DIR, r"CommonInformation\FuseNet\pamap2\2023-11-27_11-42-44_Subject4")  # one with norm2
     models = {}
     for modality in modalities:
-        models[modality] = {}
-    for modality in modalities:
-        models[modality]['base'] = CNNBaseNet(input_dim=input_size, output_channels=128, embedding=1024,
+        models['base'] = CNNBaseNet(input_dim=input_size, output_channels=128, embedding=1024,
                        num_time_steps=parameters_dict['window_size'])
-        # models[modality]['common'] =  CommonNet(1024, 256, parameters_dict['embedding_dim'])
-        models[modality]['common'] = CommonNet(7 * 128, 256, parameters_dict['embedding_dim'])
-        models[modality]['classification'] = ClassifierNet(common_rep_dim=parameters_dict['embedding_dim'],
+        models['common'] = CommonNet(7 * 128, 256, parameters_dict['embedding_dim'])
+        models['classification'] = ClassifierNet(common_rep_dim=parameters_dict['embedding_dim'],
                                                            hidden_1=256, output_dim=parameters_dict['num_activities'])
 
         # # load trained models
-        models[modality]['base'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_base_stateDict.pth')))
-        models[modality]['common'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_common_stateDict.pth')))
+        models['base'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_base_stateDict.pth')))
+        models['common'].load_state_dict(torch.load(os.path.join(model_dir, 'glob_common_stateDict.pth')))
 
 
         # freeze these two if you wish
-        for param in models[modality]['base'].parameters():
-            print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
-            print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
-            param.requires_grad = False
-        for param in models[modality]['common'].parameters():
-            print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
-            print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
-            param.requires_grad = False
+        # for param in models['base'].parameters():
+        #     print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
+        #     print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
+        #     param.requires_grad = False
+        # for param in models['common'].parameters():
+        #     print(f"Number less threshold {torch.sum(torch.abs(param) < 0.00001)} out of {torch.numel(param)}")
+        #     print(f"Number above threshold {torch.sum(torch.abs(param) > 10)} out of {torch.numel(param)}")
+        #     param.requires_grad = False
 
     models_to_push = ['base', 'common', 'classification']
     for modality in modalities:
         for model_name in models_to_push:
-            if models[modality][model_name].train_on_gpu:
-                models[modality][model_name].cuda()
+            if models[model_name].train_on_gpu:
+                models[model_name].cuda()
 
     criterion = torch.nn.CrossEntropyLoss()
     optimizers = {}
     for modality in modalities:
-        optimizers[modality] = torch.optim.Adam(list(models[modality]['classification'].parameters()) +
-                                 list(models[modality]['common'].parameters()) +
-                                 list(models[modality]['base'].parameters()),
+        optimizers[modality] = torch.optim.Adam(list(models['classification'].parameters()) +
+                                 list(models['common'].parameters()) +
+                                 list(models['base'].parameters()),
                                  lr=parameters_dict['lr'], weight_decay=parameters_dict['weight_decay'])
 
 
@@ -121,7 +122,7 @@ if __name__ == "__main__":
     for epoch in range(parameters_dict['num_epochs']):
         #enable train mode
         for modality in modalities:
-            models[modality] = enable_mode(models[modality], mode='train')
+            models = enable_mode(models, mode='train')
         batch_losses, all_ground_truth_train, all_predictions_train, all_predictions_train_confidences = train_one_epoch(trainloader, optimizers,
                                                                           models, criterion, modalities, mode='train')
         fused_predictions = fuse_predictions(all_predictions_train, all_predictions_train_confidences,
@@ -137,7 +138,7 @@ if __name__ == "__main__":
 
         # enable test mode
         for modality in modalities:
-            models[modality] = enable_mode(models[modality], mode='test')
+            models = enable_mode(models, mode='test')
         batch_losses, all_ground_truth_test, all_predictions_test, all_predictions_test_confidences = train_one_epoch(testloader, optimizers,
                                                                           models, criterion, modalities, mode='test')
         fused_predictions_test = fuse_predictions(all_predictions_test, all_predictions_test_confidences,
@@ -154,16 +155,22 @@ if __name__ == "__main__":
         print("gt unique: ", gt_unique)
         print("gt counts: ", gt_counts)
 
-        f1_test = metrics.f1_score(all_ground_truth_test[modalities[0]], fused_predictions_test, average='macro')
+        f1_test_macro = metrics.f1_score(all_ground_truth_test[modalities[0]], fused_predictions_test, average='macro')
+        f1_test_weighted = metrics.f1_score(all_ground_truth_test[modalities[0]], fused_predictions_test, average='weighted')
         acc_test = metrics.accuracy_score(all_ground_truth_test[modalities[0]], fused_predictions_test)
-        test_results.append([acc_test, f1_test, epoch + 1])
+        test_results.append([acc_test, f1_test_macro, f1_test_weighted, epoch + 1])
         result_np = np.array(test_results, dtype=float)
         np.savetxt(test_result_csv, result_np, fmt='%.4f', delimiter=',')
         print("Epoch ", epoch )
         print(f"Train f1: {f1_train},  Train acc: {acc_train}")
-        print(f"Test f1: {f1_test}, test_acc:{acc_test}")
+        print(f"Test f1: {f1_test_macro}, Test f1 weighted: {f1_test_weighted},test_acc:{acc_test}")
         print()
 
+    test_cm = confusion_matrix(final_test_gt, final_test_predictions)
+    print("final test gt uniqye")
+    print("test cm: ", test_cm)
+    print("test cm shape: ", test_cm.shape)
+    np.savetxt(os.path.join(save_dir, 'confusion.txt'), test_cm, fmt='%d')
     plot_confusion_matrix(confusion_matrix(final_test_gt, final_test_predictions),
                           data_processor.get_activity_names(),
                           title='Confusion matrix',

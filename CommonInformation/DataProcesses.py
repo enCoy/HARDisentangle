@@ -32,6 +32,14 @@ class DataProcessor():
         self.data_dict = self.prepare_data_dict()
         self.standardizers = self.obtain_standardizers()
 
+    def get_activity_names(self):
+        if self.data_name == 'pamap2':
+            return ['lying', 'sitting', 'standing', 'walking', 'running', 'cycling',
+                    'nordic walking', 'ascending stairs', 'descending stairs', 'vacuum cleaning',
+                    'ironing', 'rope jumping']
+        else:
+            return None
+
     def generate_positive_samples(self, data_dict, modalities):
         # will create two arrays -
         # input = time series modality_i window_m
@@ -204,10 +212,8 @@ class DataProcessor():
                     anchor_samples_b = data_dict[(subject_idx, modality)][0]
                     # positive samples are other modalities but the same window
                     positive_samples_b = data_dict[(subject_idx, other_modality)][0]
-                    # negative samples are the same modality but different windows - shuffled
+                    # negative samples are the same modality but different windows
                     negative_samples_b = data_dict[(subject_idx, modality)][0]
-                    # shuffling_idx = np.random.randint(low=0, high=negative_samples.shape[0], size=len(negative_samples))
-                    # negative_samples = negative_samples[shuffling_idx]
 
                     # standardize
                     anchor_samples, _ = standardize_data(anchor_samples_b,

@@ -124,17 +124,17 @@ def standardize_data(data_to_standardize, standardizer, is_generated):
 def convert_to_torch(train_X, train_y, test_X, test_y):
     # train X
     shape = train_X.shape
-    train_X = torch.from_numpy(np.reshape(train_X.astype(float), [shape[0], shape[1], shape[2]]))
+    train_X = torch.from_numpy(train_X.astype(float))
     train_X = train_X.type(torch.FloatTensor).cuda()
     # train Y
-    train_y = torch.from_numpy(train_y)
+    train_y = torch.from_numpy(train_y.astype(float))
     train_y = train_y.type(torch.FloatTensor).cuda()
     # test X
-    test_X = torch.from_numpy(np.reshape(test_X.astype(float), [test_X.shape[0], test_X.shape[1], test_X.shape[2]]))
-    test_X = test_X.type(torch.FloatTensor)
+    test_X = torch.from_numpy(test_X.astype(float))
+    test_X = test_X.type(torch.FloatTensor).cuda()
     # test y
-    test_y = torch.from_numpy(test_y.astype(np.float32))
-    test_y = test_y.type(torch.FloatTensor)
+    test_y = torch.from_numpy(test_y.astype(float))
+    test_y = test_y.type(torch.FloatTensor).cuda()
     print("Shapes after converting to torch:")
     print("Train x shape: ", train_X.size())
     print("Train y shape: ", train_y.size())
@@ -171,6 +171,28 @@ def plot_loss_curves(train_loss, test_loss, save_loc=None, show_fig=True, title=
                                 show_enable=show_fig, hold_on=True, legend_enable=True, label='test',
                                 save_path=os.path.join(save_loc, f"{title}.png"))
 
+def save_models(models, save_dir):
+    # models is a dict --- key: name of the model, value: model itself
+    # save glob model
+    model_names = list(models.keys())
+    for model_name in model_names:
+        model = models[model_name]
+        # save state dict
+        torch.save(model.state_dict(), os.path.join(save_dir, f"{model_name}_stateDict.pth"))
+        # save model
+        torch.save(model, os.path.join(save_dir, f"{model_name}.pth"))
+
+def save_best_models(models, epoch_num, save_dir):
+    # models is a dict --- key: name of the model, value: model itself
+    # save glob model
+    model_names = list(models.keys())
+    for model_name in model_names:
+        model = models[model_name]
+        # save state dict
+        torch.save(model.state_dict(), os.path.join(save_dir, f"best_{model_name}_stateDict_epoch_{epoch_num}.pth"))
+        # save model
+        torch.save(model, os.path.join(save_dir, f"best_{model_name}_epoch_{epoch_num}.pth"))
+
 
 from pathlib import Path
 def convert_win_path(win_path):
@@ -200,3 +222,66 @@ def mutual_information(mine, x, z, z_marg):
     et = torch.exp(marginal)
     mi_lb = torch.mean(joint) - torch.log(torch.mean(et))
     return mi_lb, joint, et
+
+
+# fusion of predictions
+def fuse_predictions(predictions, confidences, modalities, num_classes, fusion_mode='majority_vote'):
+    if fusion_mode == 'majority_vote':
+        fused = fuse_predictions_from_multiple_modalities_majority_vote(predictions, modalities, num_classes)
+    elif fusion_mode == 'confidence_weighted':
+        fused =  fuse_predictions_from_multiple_modalities_based_confidence_weight(predictions, confidences, modalities, num_classes)
+    elif fusion_mode == 'max_confidence':
+        fused = fuse_predictions_from_multiple_modalities_based_max_confidence(predictions, confidences, modalities, num_classes)
+    else:
+        print("FUSION MODE IS NOT VALID!")
+        fused = None
+    return fused
+
+
+def fuse_predictions_from_multiple_modalities_majority_vote(predictions, modalities, num_classes):
+    # fuse predictions - take the majority
+    fused_predictions = []
+    for j in range(len(predictions[modalities[0]])):  # over all examples
+        classes_predicted = np.zeros(num_classes)
+        modality_predictions = np.array([predictions[m][j] for m in modalities])
+        # print("modality predictions: ", modality_predictions)
+        for kk in range(len(modality_predictions)):
+            classes_predicted[modality_predictions[kk]] += 1
+        # print("class predicted: ", classes_predicted)
+        fused_predictions.append(np.argmax(classes_predicted))
+    return np.array(fused_predictions)
+
+def fuse_predictions_from_multiple_modalities_based_max_confidence(predictions, confidences, modalities, num_classes):
+    # fuse predictions - take the majority
+    fused_predictions = []
+    for j in range(len(predictions[modalities[0]])):  # over all examples
+        classes_predicted = np.zeros(num_classes)
+        modality_predictions = np.array([predictions[m][j] for m in modalities])
+        modality_predictions_confidences = np.array([confidences[m][j] for m in modalities])
+        # for kk in range(len(modality_predictions)):
+        #     classes_predicted[modality_predictions[kk]] += modality_predictions_confidences[kk]
+        # # print("class predicted: ", classes_predicted)
+        # fused_predictions.append(np.argmax(classes_predicted))
+        max_confidence_idx = np.argmax(modality_predictions_confidences)
+        fused_predictions.append(modality_predictions[max_confidence_idx])
+    return np.array(fused_predictions)
+
+def fuse_predictions_from_multiple_modalities_based_confidence_weight(predictions, confidences, modalities, num_classes):
+    # fuse predictions - take the majority
+    fused_predictions = []
+    for j in range(len(predictions[modalities[0]])):  # over all examples
+        classes_predicted = np.zeros(num_classes)
+        modality_predictions = np.array([predictions[m][j] for m in modalities])
+        modality_predictions_confidences = np.array([confidences[m][j] for m in modalities])
+        for kk in range(len(modality_predictions)):
+            classes_predicted[modality_predictions[kk]] += modality_predictions_confidences[kk]
+        fused_predictions.append(np.argmax(classes_predicted))
+    return np.array(fused_predictions)
+
+def get_standardizer(data):
+    # assuming that data has shape N x T x F, this one standardizes over F
+    # Calculate mean and standard deviation along the feature axis
+    mean_values = np.mean(data, axis=(0, 1), keepdims=True)
+    std_values = np.std(data, axis=(0, 1), keepdims=True)
+    # Standardize the dataset
+    return mean_values, std_values
