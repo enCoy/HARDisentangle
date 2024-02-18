@@ -23,6 +23,8 @@ class DownstreamDataProcessor():
         self.sliding_window_overlap_ratio = sliding_window_overlap_ratio  # in [0, 1] 1 means complete overlap, 0 means no overlap between windows
         self.sampling_rate = sampling_rate  # in Hz
         self.data_name = data_name  # 'real', 'pamap2'
+        self.train_subjects_list = []
+        self.test_subjects_list = []
 
     def get_activity_names(self):
         if self.data_name == 'pamap2':
@@ -61,10 +63,11 @@ class DownstreamDataProcessor():
             if i == self.target_subject_num:
                 test_X = data
                 test_y = one_hot_labels
+                self.test_subjects_list.extend([i for m in range(data.shape[0])])
             else:
                 train_X = np.vstack((train_X, data))
                 train_y = np.concatenate((train_y, one_hot_labels))
-        # standardize data
+                self.train_subjects_list.extend([i for m in range(data.shape[0])])
         # standardize data
         mean_vals, std_vals = get_standardizer(train_X)
         self.mean_vals = mean_vals

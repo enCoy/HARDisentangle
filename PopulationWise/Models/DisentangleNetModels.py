@@ -77,3 +77,17 @@ class ReconstructNet(nn.Module):
 
     def forward(self, x):
         return self.fc(x)
+
+
+class Mine(nn.Module):
+    def __init__(self, x_dim, z_dim, hidden_dim, train_on_gpu = True):
+        super(Mine, self).__init__()
+        self.fcx = nn.Sequential(nn.Linear(x_dim, hidden_dim // 4))
+        self.fcz = nn.Sequential(nn.Linear(z_dim, hidden_dim // 4))
+        self.fc = nn.Linear(hidden_dim // 4, 1)
+        self.train_on_gpu = train_on_gpu
+
+    def forward(self, x, z):
+        h1 = F.leaky_relu(self.fcx(x) + self.fcz(z))
+        h2 = self.fc(h1)
+        return h2
