@@ -1,11 +1,12 @@
 import warnings
 from Utils.HelperFunctions import plot_loss_curves, save_models, save_best_models
+from Utils.HelperFunctions import  mutual_information as mi_loss
 from torch.utils.data import DataLoader
 from DataProcesses import SelfSupervisedDataProcessor, SelfSupervisedDataProcessorForTesting
 import time
 from DataProcesses import get_pamap2_dataframe
 import torch
-from Models.DisentangleNetModels import CNNBaseNet, PopulationEncoder, PersonalizedEncoder, ReconstructNet
+from Models.DisentangleNetModels import CNNBaseNet, PopulationEncoder, PersonalizedEncoder, ReconstructNet, Mine
 from time import localtime, strftime
 import os
 import torch.nn as nn
@@ -49,13 +50,14 @@ def get_loader(parameters_dict, target_subject, dataset_type='train'):
     return loader
 
 
-def train_model_one_epoch(loader, base_net, person_enc, pop_enc, reconst_net, reconst_loss_fn, contrast_loss_fn, cost_params,
-                          epoch_losses, parameters):
+def train_model_one_epoch(loader, base_net, person_enc, pop_enc, reconst_net, reconst_loss_fn, contrast_loss_fn, mine_loss, cost_params,
+                          epoch_losses, parameters, ma_et):
     batch_losses = {
         'total_loss': [],
         'reconstruction_loss': [],
         'info_pop_loss': [],
-        'info_per_loss': []
+        'info_per_loss': [],
+        'mine': []
     }
     for batch in loader:
         anchor = batch['anchor'].view(-1, parameters['window_size'],
@@ -87,39 +89,43 @@ def train_model_one_epoch(loader, base_net, person_enc, pop_enc, reconst_net, re
 
         # todo: mutual info
         # # this is how several people sample marginal distribution
-        # unique_shuffled = torch.index_select(  # shuffles the noise
-        #     unique_representation, 0, torch.randperm(unique_representation.shape[0]).cuda())
-        # # mi_score = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
+        personalized_shuffled = torch.index_select(  # shuffles the noise
+            anc_per, 0, torch.randperm(anc_per.shape[0]).cuda())
+        # mi_score = -mine_loss(mine, anc_pop, anc_per, personalized_shuffled)
         # # source: https://github.com/sungyubkim/MINE-Mutual-Information-Neural-Estimation-/blob/master/MINE.ipynb
-        # ma_rate = 0.05
-        # mi_lb, joint, et = mi_estimator(mine, common_representation, unique_representation, unique_shuffled)
-        # ma_et = (1 - ma_rate) * ma_et + ma_rate * torch.mean(et)
-        # # unbiasing use moving average
-        # MI_loss = -(torch.mean(joint) - (1 / ma_et.mean()).detach() * torch.mean(et))
+        ma_rate = 0.01
+        mi_lb, joint, et = mine_loss(mine, anc_pop, anc_per, personalized_shuffled)
+        ma_et = (1 - ma_rate) * ma_et + ma_rate * torch.mean(et)
+        # unbiasing use moving average
+        MI_loss = -(torch.mean(joint) - (1 / ma_et.mean()).detach() * torch.mean(et))
 
         total_loss = cost_params['lambda_reconst'] * reconstruction_loss + \
-                     cost_params['lambda_info_per'] * infoNCE_person + cost_params['lambda_info_pop'] * infoNCE_pop
+                     cost_params['lambda_info_per'] * infoNCE_person + cost_params['lambda_info_pop'] * infoNCE_pop \
+                     + cost_params['lambda_mine']*MI_loss
         total_loss.backward()
         optimizer.step()
 
-        batch_losses['total_loss'].append(total_loss.item())
+        batch_losses['total_loss'].append(total_loss.item() - MI_loss.item())
         batch_losses['reconstruction_loss'].append(reconstruction_loss.detach().item())
         batch_losses['info_per_loss'].append(infoNCE_person.detach().item())
         batch_losses['info_pop_loss'].append(infoNCE_pop.detach().item())
+        batch_losses['mine'].append(MI_loss.detach().item())
     # add the losses to epoch loss
     epoch_losses['total_loss'].append(np.mean(batch_losses['total_loss']))
     epoch_losses['reconstruction_loss'].append(np.mean(batch_losses['reconstruction_loss']))
     epoch_losses['info_per_loss'].append(np.mean(batch_losses['info_per_loss']))
     epoch_losses['info_pop_loss'].append(np.mean(batch_losses['info_pop_loss']))
+    epoch_losses['mine'].append(np.mean(batch_losses['mine']))
     return epoch_losses
 
-def test_model(loader, base_net, person_enc, pop_enc, reconst_net, reconst_loss_fn, contrast_loss_fn, cost_params,
-                          epoch_losses, parameters):
+def test_model(loader, base_net, person_enc, pop_enc, reconst_net, reconst_loss_fn, contrast_loss_fn, mine_loss, cost_params,
+                          epoch_losses, parameters, ma_et):
     batch_losses = {
         'total_loss': [],
         'reconstruction_loss': [],
         'info_pop_loss': [],
-        'info_per_loss': []
+        'info_per_loss': [],
+        'mine': []
     }
     with torch.no_grad():
         for batch in loader:
@@ -149,19 +155,31 @@ def test_model(loader, base_net, person_enc, pop_enc, reconst_net, reconst_loss_
             reconstruction_loss = reconst_loss_fn(reconstructed, anchor)
             infoNCE_pop = contrast_loss_fn(anc_pop, pos_pop, neg_pop)
             infoNCE_person = contrast_loss_fn(anc_per, pos_per, neg_per)
+            personalized_shuffled = torch.index_select(  # shuffles the noise
+                anc_per, 0, torch.randperm(anc_per.shape[0]).cuda())
+
+            ma_rate = 0.01
+            mi_lb, joint, et = mine_loss(mine, anc_pop, anc_per, personalized_shuffled)
+            ma_et = (1 - ma_rate) * ma_et + ma_rate * torch.mean(et)
+            # unbiasing use moving average
+            MI_loss = -(torch.mean(joint) - (1 / ma_et.mean()).detach() * torch.mean(et))
 
             total_loss = cost_params['lambda_reconst'] * reconstruction_loss + \
-                         cost_params['lambda_info_per'] * infoNCE_person + cost_params['lambda_info_pop'] * infoNCE_pop
+                         cost_params['lambda_info_per'] * infoNCE_person + cost_params['lambda_info_pop'] * infoNCE_pop \
+                       + cost_params['lambda_mine']*MI_loss
 
-            batch_losses['total_loss'].append(total_loss.item())
+            batch_losses['total_loss'].append(total_loss.item() - MI_loss.item())
             batch_losses['reconstruction_loss'].append(reconstruction_loss.detach().item())
             batch_losses['info_per_loss'].append(infoNCE_person.detach().item())
             batch_losses['info_pop_loss'].append(infoNCE_pop.detach().item())
+            batch_losses['mine'].append(MI_loss.detach().item())
+
         # add the losses to epoch loss
         epoch_losses['total_loss'].append(np.mean(batch_losses['total_loss']))
         epoch_losses['reconstruction_loss'].append(np.mean(batch_losses['reconstruction_loss']))
         epoch_losses['info_per_loss'].append(np.mean(batch_losses['info_per_loss']))
         epoch_losses['info_pop_loss'].append(np.mean(batch_losses['info_pop_loss']))
+        epoch_losses['mine'].append(np.mean(batch_losses['mine']))
     return epoch_losses
 
 
@@ -186,7 +204,7 @@ def get_encodings(x, base_net, person_enc, pop_enc):
 
 if __name__ == "__main__":
     warnings.filterwarnings('ignore')
-    machine = 'windows'
+    machine = 'linux'
     if machine == 'linux':
         BASE_DIR = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR'
     else:
@@ -208,7 +226,8 @@ if __name__ == "__main__":
     cost_params = {
         'lambda_info_pop': 1.0,
         'lambda_info_per': 1.0,
-        'lambda_reconst': 1.0
+        'lambda_reconst': 1.0,
+        'lambda_mine': 0.25
     }
     parameters = {
         'base_net_out_channel': 256,
@@ -218,14 +237,15 @@ if __name__ == "__main__":
         'batch_size': 32,
         'model_shared_seed': 23,
         'learning_rate': 0.001,
-        'num_epochs': 2,
+        'num_epochs': 50,
         'weight_decay': 1e-6,
         'cost_params': cost_params,
-        'num_neg_samples': 64,
+        'num_neg_samples': 512,
         'data_name': 'pamap2',
         'window_size': 50,
         'sampling_rate': 50,
         'sliding_window_overlap_ratio': 0.5,
+        'best_epoch': 0
     }
     if parameters['data_name'] == 'pamap2':
         parameters['num_subjects'] = 8
@@ -275,14 +295,15 @@ if __name__ == "__main__":
             hidden_1=128, output_dim=parameters['window_size'] * parameters['num_modalities'], train_on_gpu=True)
 
         # todo: add MINE, add negative and positive representations
-        # mine = Mine(x_dim=parameters_dict['embedding_dim'], z_dim=parameters_dict['embedding_dim'],
-        #             hidden_dim=parameters_dict['embedding_dim'] // 2)
+        mine = Mine(x_dim=parameters['population_output_dim'], z_dim=parameters['personalized_output_dim'],
+                    hidden_dim=parameters['population_output_dim'] // 2)
 
         all_models = {
             'base_net': base_net,
             'population_encoder': population_encoder,
             'personalized_encoder': personalized_encoder,
-            'reconstruct_net': reconstruct_net
+            'reconstruct_net': reconstruct_net,
+            'mine': mine
         }
         all_models_names = list(all_models.keys())
         # put the models in CUDA
@@ -296,7 +317,8 @@ if __name__ == "__main__":
         info_nce_loss = InfoNCE(negative_mode='paired')
         # optimizer
         optimizer = torch.optim.Adam(list(base_net.parameters()) + list(population_encoder.parameters())
-                                     + list(personalized_encoder.parameters()) + list(reconstruct_net.parameters()),
+                                     + list(personalized_encoder.parameters()) + list(reconstruct_net.parameters()) +
+                                     list(mine.parameters()),
                                      lr=parameters['learning_rate'], weight_decay=parameters['weight_decay'])
 
         # training
@@ -304,15 +326,18 @@ if __name__ == "__main__":
             'total_loss': [],
             'reconstruction_loss': [],
             'info_pop_loss': [],
-            'info_per_loss': []
+            'info_per_loss': [],
+            'mine': []
         }
         test_epoch_losses = {
             'total_loss': [],
             'reconstruction_loss': [],
             'info_pop_loss': [],
-            'info_per_loss': []
+            'info_per_loss': [],
+            'mine': []
         }
         best_val_loss = np.inf
+        ma_et = 1.0
         for epoch in range(parameters['num_epochs']):
             epoch_starting_time = time.time()
             print(f"Epoch {epoch + 1} is started...")
@@ -323,16 +348,22 @@ if __name__ == "__main__":
                                                        personalized_encoder, population_encoder, reconstruct_net,
                                                        reconst_loss_fn=mse_loss,
                                                        contrast_loss_fn=info_nce_loss,
+                                                       mine_loss = mi_loss,
                                                        cost_params=cost_params,
-                                                       epoch_losses=train_epoch_losses)
+                                                       epoch_losses=train_epoch_losses,
+                                                       parameters=parameters,
+                                                       ma_et=ma_et)
 
             # testing
             test_epoch_losses = test_model(test_loader, base_net,
                                            personalized_encoder, population_encoder, reconstruct_net,
                                            reconst_loss_fn=mse_loss,
                                            contrast_loss_fn=info_nce_loss,
+                                           mine_loss=mi_loss,
                                            cost_params=cost_params,
-                                           epoch_losses=test_epoch_losses)
+                                           epoch_losses=test_epoch_losses,
+                                           parameters=parameters,
+                                           ma_et=ma_et)
             print("Elapsed time: ", time.time() - epoch_starting_time)
             print_losses(train_epoch_losses, test_epoch_losses)
 
@@ -345,6 +376,11 @@ if __name__ == "__main__":
             # if it has best validation loss, save that model
             if test_epoch_losses['total_loss'][-1] < best_val_loss:
                 best_val_loss = test_epoch_losses['total_loss'][-1]
-                save_best_models(all_models, epoch, save_dir=subject_output_dir)
+                save_best_models(all_models, save_dir=subject_output_dir)
+                parameters['best_epoch'] = epoch + 1
+                # Save parameter dictionary as a text file
+                with open(os.path.join(output_dir, 'parameters.txt'), 'w') as file:
+                    for key, value in parameters.items():
+                        file.write(f"{key}: {value}\n")
 
             # todo: look at domain discrimination loss

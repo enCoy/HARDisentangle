@@ -182,16 +182,16 @@ def save_models(models, save_dir):
         # save model
         torch.save(model, os.path.join(save_dir, f"{model_name}.pth"))
 
-def save_best_models(models, epoch_num, save_dir):
+def save_best_models(models, save_dir):
     # models is a dict --- key: name of the model, value: model itself
     # save glob model
     model_names = list(models.keys())
     for model_name in model_names:
         model = models[model_name]
         # save state dict
-        torch.save(model.state_dict(), os.path.join(save_dir, f"best_{model_name}_stateDict_epoch_{epoch_num}.pth"))
+        torch.save(model.state_dict(), os.path.join(save_dir, f"best_{model_name}_stateDict.pth"))
         # save model
-        torch.save(model, os.path.join(save_dir, f"best_{model_name}_epoch_{epoch_num}.pth"))
+        torch.save(model, os.path.join(save_dir, f"best_{model_name}.pth"))
 
 
 from pathlib import Path
