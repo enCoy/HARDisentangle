@@ -10,17 +10,20 @@ class CNNBaseNet(nn.Module):
         self.train_on_gpu = train_on_gpu
 
         self.cnn = nn.Sequential(
-            nn.Conv2d(input_dim, output_channels, kernel_size=(5, 1)),  #reduce dimension by 4 -> 46
-            nn.MaxPool2d((2, 1)),  # divide 2 -> 23
+            nn.Conv2d(input_dim, output_channels, kernel_size=(3, 1)),  #reduce dimension by 2 -> 48
+            nn.MaxPool2d((2, 1)),  # divide 2 -> 24
             nn.ReLU(),
-            nn.Conv2d(output_channels, output_channels, kernel_size=(5, 1)),  # -> 19
+            nn.Conv2d(output_channels, output_channels, kernel_size=(3, 1)),  # -> 22
             nn.MaxPool2d((2, 1)),  # 9
             nn.ReLU(),
-            nn.Conv2d(output_channels, output_channels, kernel_size=(3, 1)),  # 7
+            nn.Conv2d(output_channels, output_channels, kernel_size=(3, 1)),  # 9
             nn.ReLU(),
         )
-
-        self.fc = nn.Linear(7 * output_channels, output_dim)
+        self.fc = nn.Sequential(
+            nn.Linear(9 * output_channels, output_dim),
+            nn.BatchNorm1d(output_dim),
+            nn.ReLU()
+        )
 
     def forward(self, x):
         x = x.reshape(-1, self.input_dim, self.num_time_steps)  # shape (batch_size, channel, win)
@@ -36,13 +39,9 @@ class CNNBaseNet(nn.Module):
 class PopulationEncoder(nn.Module):
     def __init__(self, input_dim, hidden_1, output_dim, train_on_gpu=True):
         super(PopulationEncoder, self).__init__()
-        self.input_dim = input_dim
-        self.fc = nn.Sequential(nn.ReLU(),
-                            nn.Linear(self.input_dim, hidden_1),
-                              nn.ReLU(),
-                                nn.Linear(hidden_1, hidden_1 // 2),
-                                nn.ReLU(),
-                                nn.Linear(hidden_1 // 2, output_dim))
+        self.fc = nn.Sequential(
+                            nn.Linear(input_dim, output_dim)
+                                )
         self.train_on_gpu = train_on_gpu
 
     def forward(self, x):
@@ -51,13 +50,9 @@ class PopulationEncoder(nn.Module):
 class PersonalizedEncoder(nn.Module):
     def __init__(self, input_dim, hidden_1, output_dim, train_on_gpu=True):
         super(PersonalizedEncoder, self).__init__()
-        self.input_dim = input_dim
-        self.fc = nn.Sequential(nn.ReLU(),
-                                nn.Linear(self.input_dim, hidden_1),
-                                nn.ReLU(),
-                                nn.Linear(hidden_1, hidden_1 // 2),
-                                nn.ReLU(),
-                                nn.Linear(hidden_1 // 2, output_dim))
+        self.fc = nn.Sequential(
+            nn.Linear(input_dim, output_dim)
+        )
         self.train_on_gpu = train_on_gpu
 
     def forward(self, x):
@@ -66,13 +61,9 @@ class PersonalizedEncoder(nn.Module):
 class ReconstructNet(nn.Module):
     def __init__(self, input_dim, hidden_1, output_dim, train_on_gpu=True):
         super(ReconstructNet, self).__init__()
-        self.input_dim = input_dim
         self.fc = nn.Sequential(nn.ReLU(),
-                                nn.Linear(self.input_dim, hidden_1),
-                              nn.ReLU(),
-                              nn.Linear(hidden_1, hidden_1),
-                                nn.ReLU(),
-                                nn.Linear(hidden_1, output_dim))
+                                nn.Linear(input_dim, output_dim)
+                                )
         self.train_on_gpu = train_on_gpu
 
     def forward(self, x):

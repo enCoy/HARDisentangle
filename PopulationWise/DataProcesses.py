@@ -153,11 +153,6 @@ class SelfSupervisedDataProcessor(Dataset):
         pop_enc_pos_sample = all_people_same_activity['data'].sample(n=1).to_numpy()[0]
         pop_enc_pos_sample = np.array(pop_enc_pos_sample, dtype=float)  # shaped (WindowSize, FeatureDim)
 
-        # personalized_encoder positive sample is the same person, any activity - attracts representations of the same person as long as it is the same person
-        # get a random sample
-        person_enc_pos_sample = all_activities_same_person['data'].sample(n=1).to_numpy()[0]
-        person_enc_pos_sample = np.array(person_enc_pos_sample, dtype=float) #  shaped (WindowSize, FeatureDim)
-
         # retrieve negative samples
         # population_encoder negative sample is different activities - the same person - repels other activities
         # Sample K rows from the DataFrame
@@ -166,6 +161,10 @@ class SelfSupervisedDataProcessor(Dataset):
         pop_enc_neg_sample = np.stack(sampled_rows['data'].values, axis=0)
         # same_person_different_activity = np.stack(all_people_other_activities['data'].values)  # this is too slow
 
+        # personalized_encoder positive sample is the same person, any activity - attracts representations of the same person as long as it is the same person
+        # get a random sample
+        person_enc_pos_sample = all_activities_same_person['data'].sample(n=1).to_numpy()[0]
+        person_enc_pos_sample = np.array(person_enc_pos_sample, dtype=float)  # shaped (WindowSize, FeatureDim)
 
         # personalized_encoder negative sample is the same activity - different people - repels different people
         # Sample K rows from the DataFrame
