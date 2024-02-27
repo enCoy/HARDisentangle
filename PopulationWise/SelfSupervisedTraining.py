@@ -4,7 +4,7 @@ from Utils.HelperFunctions import  mutual_information as mi_loss
 from torch.utils.data import DataLoader
 from DataProcesses import SelfSupervisedDataProcessor, SelfSupervisedDataProcessorForTesting
 import time
-from DataProcesses import get_pamap2_dataframe
+from DataProcesses import get_pamap2_dataframe, get_motionsense_dataframe
 import torch
 from Models.DisentangleNetModels import CNNBaseNet, PopulationEncoder, PersonalizedEncoder, ReconstructNet, Mine
 from time import localtime, strftime
@@ -250,7 +250,7 @@ if __name__ == "__main__":
         'weight_decay': 1e-4,
         'cost_params': cost_params,
         'num_neg_samples': 128,
-        'data_name': 'pamap2',
+        'data_name': 'motionsense',
         'window_size': 50,
         'sampling_rate': 50,
         'sliding_window_overlap_ratio': 0.5,
@@ -261,6 +261,11 @@ if __name__ == "__main__":
         parameters['num_activities'] = 12
         parameters['num_modalities'] = 27  # two acc 1 gyro, 3 axis per sensor and 3 different locations = 3x3x3=27
         parameters['dataframe_dir'] = os.path.join(BASE_DIR, r"PAMAP2_Dataset/PAMAP2_Dataset/Processed50Hz")
+    elif parameters['data_name'] == 'motionsense':
+        parameters['num_subjects'] = 24
+        parameters['num_activities'] = 6
+        parameters['num_modalities'] = 6  #acc + gyro
+        parameters['dataframe_dir'] = os.path.join(BASE_DIR, r"MotionSenseDataset\SubjectWiseData")
     else:  # real
         parameters['num_subjects'] = 15
         parameters['num_activities'] = 8
@@ -272,12 +277,19 @@ if __name__ == "__main__":
         for key, value in parameters.items():
             file.write(f"{key}: {value}\n")
 
-    if parameters['dataframe_dir'] == 'pamap2':
+    if parameters['data_name'] == 'pamap2':
         dataframe = get_pamap2_dataframe(data_dir=parameters['dataframe_dir'],
                                          num_subjects=parameters['num_subjects'],
                                          window_size=parameters['window_size'],
                                          sliding_overlap=parameters['sliding_window_overlap_ratio'],
                                          num_activities=parameters['num_activities'])
+    elif parameters['data_name'] == 'motionsense':
+        dataframe = get_motionsense_dataframe(data_dir=parameters['dataframe_dir'],
+                                         num_subjects=parameters['num_subjects'],
+                                         window_size=parameters['window_size'],
+                                         sliding_overlap=parameters['sliding_window_overlap_ratio'],
+                                         num_activities=parameters['num_activities'])
+
 
     for test_subject in range(1, parameters['num_subjects']+1):
         subject_output_dir = os.path.join(output_dir, f'S{test_subject}')
