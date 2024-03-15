@@ -16,7 +16,7 @@ if __name__ == "__main__":
     dataset_dir = r"C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR\MotionSenseDataset"
     general_data_path = os.path.join(dataset_dir, 'A_DeviceMotion_data')
     num_subjects = 24
-    subtract_gravity = True
+    subtract_gravity = False
     dataframe_columns = ['acc_x', 'acc_y', 'acc_z', 'gyr_x', 'gyr_y', 'gyr_z', 'activity_id']
     output_dir = os.path.join(dataset_dir, 'SubjectWiseData')
     if not os.path.exists(output_dir):

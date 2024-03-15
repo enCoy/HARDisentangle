@@ -31,6 +31,8 @@ class DownstreamDataProcessor():
             return ['lying', 'sitting', 'standing', 'walking', 'running', 'cycling',
                     'nordic walking', 'ascending stairs', 'descending stairs', 'vacuum cleaning',
                     'ironing', 'rope jumping']
+        elif self.data_name == 'motionsense':
+            return ['dws', 'ups', 'sit', 'std', 'wlk', 'jog']
         else:
             return None
 
@@ -43,6 +45,8 @@ class DownstreamDataProcessor():
         test_y = None
         if self.data_name == 'pamap2':
             train_X, train_y, test_X, test_y = self.get_pamap2_train_test_data()
+        elif self.data_name == 'motionsense':
+            train_X, train_y, test_X, test_y = self.get_motionsense_train_test_data()
         # elif self.data_name == 'real':
         #     train_X, train_y, test_X, test_y = self.get_realworld_train_test_data()
         else:
@@ -108,6 +112,42 @@ class DownstreamDataProcessor():
         print(f'REALWORLD test y shape ->', test_y.shape)
         return train_X, train_y, test_X, test_y
 
+    def get_motionsense_train_test_data(self):
+        # this is going to separate training and test subjects' data - test will include only target subject
+        # training will include other subjects
+        train_X = np.empty((0, self.window_size, self.num_modalities))
+        train_y = np.empty((0, self.num_activities))
+        test_X = np.empty((0, self.window_size, self.num_modalities))
+        test_y = np.empty((0, self.num_activities))
+        # traverse subjects, reserve target subject for testing, others for training
+        for i in range(1, self.num_subjects + 1):
+            data, one_hot_labels = read_motionsense_single_subject(self.data_dir, i, self.window_size,
+                               self.sliding_window_overlap_ratio, num_activities=self.num_activities)
+            if i == self.target_subject_num:
+                test_X = data
+                test_y = one_hot_labels
+                self.test_subjects_list.extend([i for m in range(data.shape[0])])
+            else:
+                train_X = np.vstack((train_X, data))
+                train_y = np.concatenate((train_y, one_hot_labels))
+                self.train_subjects_list.extend([i for m in range(data.shape[0])])
+
+
+        # standardize data
+        mean_vals, std_vals = get_standardizer(train_X)
+        self.mean_vals = mean_vals
+        self.std_vals = std_vals
+        print("mean vals: ", self.mean_vals)
+        print("std vals: ", self.std_vals)
+        train_X = (train_X - self.mean_vals) / self.std_vals
+        test_X = (test_X - self.mean_vals) / self.std_vals
+        print(f'MotionSense test user ->', self.target_subject_num)
+        print(f'MotionSense train X shape ->', train_X.shape)
+        print(f'MotionSense train y shape ->', train_y.shape)
+        print(f'MotionSense test X shape ->', test_X.shape)
+        print(f'MotionSense test y shape ->', test_y.shape)
+        return train_X, train_y, test_X, test_y
+
 
 class SelfSupervisedDataProcessor(Dataset):
     def __init__(self, dataframe_dir, data_name, target_subject_num, num_subjects, window_size, num_modalities,
@@ -120,12 +160,18 @@ class SelfSupervisedDataProcessor(Dataset):
         self.sampling_rate = sampling_rate  # in Hz
         self.data_name = data_name  # 'real', 'pamap2'
         self.num_neg_samples = num_neg_samples
+        self.personalized_sampling_mode = 'activity_based'
 
         self.dataframe = pd.read_csv(os.path.join(dataframe_dir, 'dataframe_all_subjects.csv'))
         # the following line is crucial for saving list of lists - otherwise, it converts the list into strings
         self.dataframe['data'] = self.dataframe ['data'].apply(lambda x: json.loads(x))
-        # remove target subject num - it is for testing
-        self.dataframe = self.dataframe[self.dataframe['subj_id'] != target_subject_num]
+
+        if isinstance(target_subject_num, list):
+            for subject_no in target_subject_num:
+                self.dataframe = self.dataframe[self.dataframe['subj_id'] != subject_no]
+        else:  # only one target subject num - leave one out cross validation
+            # remove target subject num - it is for testing
+            self.dataframe = self.dataframe[self.dataframe['subj_id'] != target_subject_num]
 
         # stacked data array
         stacked_data = np.stack(self.dataframe['data'].values)
@@ -144,8 +190,15 @@ class SelfSupervisedDataProcessor(Dataset):
 
         all_people_same_activity = self.dataframe[self.dataframe['act_name'] == anchor_activity]
         all_people_other_activities = self.dataframe[self.dataframe['act_name'] != anchor_activity]
+
+        # old version
         all_activities_same_person = self.dataframe[self.dataframe['subj_id'] == anchor_subj]
         all_activities_other_people = self.dataframe[self.dataframe['subj_id'] != anchor_subj]
+        # new version
+        same_person_same_activity = all_activities_same_person[
+            all_activities_same_person['act_name'] == anchor_activity]
+        other_people_same_activity = all_activities_other_people[
+            all_activities_other_people['act_name'] == anchor_activity]
 
         # retrieve positive samples
         # population_encoder positive sample is same activity - from all people - attracts representations of all people as long as it is the same activity
@@ -163,12 +216,12 @@ class SelfSupervisedDataProcessor(Dataset):
 
         # personalized_encoder positive sample is the same person, any activity - attracts representations of the same person as long as it is the same person
         # get a random sample
-        person_enc_pos_sample = all_activities_same_person['data'].sample(n=1).to_numpy()[0]
+        person_enc_pos_sample = same_person_same_activity['data'].sample(n=1).to_numpy()[0]
         person_enc_pos_sample = np.array(person_enc_pos_sample, dtype=float)  # shaped (WindowSize, FeatureDim)
 
         # personalized_encoder negative sample is the same activity - different people - repels different people
         # Sample K rows from the DataFrame
-        sampled_rows = all_activities_other_people.sample(self.num_neg_samples)
+        sampled_rows = other_people_same_activity.sample(self.num_neg_samples)
         # Concatenate the 'data' values of the sampled rows
         person_enc_neg_sample = np.stack(sampled_rows['data'].values, axis=0)
 
@@ -186,7 +239,6 @@ class SelfSupervisedDataProcessor(Dataset):
                   'person_enc_neg': np.asarray(person_enc_neg_sample, dtype=np.float32)}
         return sample
 
-
 class SelfSupervisedDataProcessorForTesting(Dataset):
     def __init__(self, dataframe_dir, data_name, target_subject_num, num_subjects, window_size, num_modalities,
                  sampling_rate, sliding_window_overlap_ratio, num_neg_samples=3):
@@ -201,10 +253,23 @@ class SelfSupervisedDataProcessorForTesting(Dataset):
 
         self.dataframe = pd.read_csv(os.path.join(dataframe_dir, 'dataframe_all_subjects.csv'))
         # the following line is crucial for saving list of lists - otherwise, it converts the list into strings
-        self.dataframe['data'] = self.dataframe ['data'].apply(lambda x: json.loads(x))
-        # remove target subject num - it is for testing
-        self.target_dataframe = self.dataframe[self.dataframe['subj_id'] == target_subject_num]
-        self.training_subjects_dataframe = self.dataframe[self.dataframe['subj_id'] != target_subject_num]
+        self.dataframe['data'] = self.dataframe['data'].apply(lambda x: json.loads(x))
+
+        if isinstance(target_subject_num, list):
+            list_of_all_subjects = [m+1 for m in range(self.num_subjects)]
+            non_target_subjects = [x for x in list_of_all_subjects if x not in target_subject_num]
+            # non target - training subjects
+            self.training_subjects_dataframe = self.dataframe[self.dataframe['subj_id'].isin(non_target_subjects)]
+            # target dataframe with target subjects
+            self.target_dataframe = self.dataframe[self.dataframe['subj_id'].isin(target_subject_num)]
+        else:  # only one target subject num - leave one out cross validation
+            # remove target subject num - it is for testing
+            self.target_dataframe = self.dataframe[self.dataframe['subj_id'] == target_subject_num]
+            self.training_subjects_dataframe = self.dataframe[self.dataframe['subj_id'] != target_subject_num]
+        print("Training subjects dataframe length: ", len(self.training_subjects_dataframe))
+        print("Target subjects dataframe length: ", len(self.target_dataframe))
+        print("Full dataframe length: ", len(self.dataframe))
+
 
         # stacked data array for other subjects
         stacked_data = np.stack(self.training_subjects_dataframe['data'].values)
@@ -223,8 +288,13 @@ class SelfSupervisedDataProcessorForTesting(Dataset):
 
         all_people_same_activity = self.training_subjects_dataframe[self.training_subjects_dataframe['act_name'] == anchor_activity]
         all_people_other_activities = self.training_subjects_dataframe[self.training_subjects_dataframe['act_name'] != anchor_activity]
+
+        # old version of personalization
         all_activities_same_person = self.target_dataframe[self.target_dataframe['subj_id'] == anchor_subj]
         all_activities_other_people = self.training_subjects_dataframe[self.training_subjects_dataframe['subj_id'] != anchor_subj]
+        # new version
+        same_person_same_activity = all_activities_same_person[all_activities_same_person['act_name'] == anchor_activity]
+        other_people_same_activity = all_activities_other_people[all_activities_other_people['act_name'] == anchor_activity]
 
         # retrieve positive samples
         # population_encoder positive sample is same activity - from other people
@@ -234,7 +304,7 @@ class SelfSupervisedDataProcessorForTesting(Dataset):
 
         # personalized_encoder positive sample is the same person, different activity
         # get a random sample
-        person_enc_pos_sample = all_activities_same_person['data'].sample(n=1).to_numpy()[0]
+        person_enc_pos_sample = same_person_same_activity['data'].sample(n=1).to_numpy()[0]
         person_enc_pos_sample = np.array(person_enc_pos_sample, dtype=float) #  shaped (WindowSize, FeatureDim)
 
         # retrieve negative samples
@@ -248,7 +318,7 @@ class SelfSupervisedDataProcessorForTesting(Dataset):
 
         # personalized_encoder negative sample is the same activity - different people
         # Sample K rows from the DataFrame
-        sampled_rows = all_activities_other_people.sample(self.num_neg_samples)
+        sampled_rows = other_people_same_activity.sample(self.num_neg_samples)
         # Concatenate the 'data' values of the sampled rows
         person_enc_neg_sample = np.stack(sampled_rows['data'].values, axis=0)
 
@@ -432,7 +502,6 @@ def get_motionsense_dataframe(data_dir, num_subjects, window_size, sliding_overl
             # dict_subj['data'] = data
             # list_of_lists = [arr.tolist() for arr in data]
             list_of_lists = [[list(row) for row in matrix] for matrix in data]
-            # print("aha sorun: ", list_of_lists[0:10])
             dict_subj['data'] = list_of_lists
 
             df_to_append = pd.DataFrame(dict_subj, columns=dataframe.columns)
@@ -454,6 +523,7 @@ def read_motionsense_single_subject(data_dir, subject_idx, window_size,
                               ss=(calculate_amount_of_slide(window_size,
                                                             sliding_overlap),
                                   1))
+        print("Data shape after: ", data.shape)
         label = sliding_window(label, ws=window_size,
                                ss=calculate_amount_of_slide(window_size,
                                                             sliding_overlap))

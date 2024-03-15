@@ -11,12 +11,16 @@ import torch.utils.data as Data
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import random
 
 
-def get_activity_names():
-    return ['lying', 'sitting', 'standing', 'walking', 'running', 'cycling',
+def get_activity_names(data_name):
+    if data_name == 'pamap2':
+        return ['lying', 'sitting', 'standing', 'walking', 'running', 'cycling',
                 'nordic walking', 'ascending stairs', 'descending stairs', 'vacuum cleaning',
                 'ironing', 'rope jumping']
+    elif data_name =='motionsense':
+        return ['dws', 'ups', 'sit', 'std', 'wlk', 'jog']
 
 def get_custom_legend_patches(colors, labels):
     patches = []
@@ -25,10 +29,21 @@ def get_custom_legend_patches(colors, labels):
     return patches
 
 
-def get_TSNE_plot(X, activities, subjects, title, save_dir=None):
+def get_TSNE_plot(X, activities, subjects, title, data_name, save_dir=None):
     # Define colors and markers for subjects and activities
-    subject_colors = ['indianred', 'royalblue', 'seagreen', 'coral', 'darkmagenta', 'gold', 'cyan', 'orchid']
-    activity_markers = ['o', 's', '^', 'v', 'D', 'P', '*', '+', '8', 'h', 'x', '1']
+    if data_name == 'pamap2':
+        subject_colors = ['indianred', 'royalblue', 'seagreen', 'coral', 'darkmagenta', 'gold', 'cyan', 'orchid']
+        activity_markers = ['o', 's', '^', 'v', 'D', 'P', '*', '+', '8', 'h', 'x', '1']
+    elif data_name == 'motionsense':
+        def generate_random_color():
+            r = random.randint(0, 255)
+            g = random.randint(0, 255)
+            b = random.randint(0, 255)
+            return "#{:02x}{:02x}{:02x}".format(r, g, b)
+        # Generate 24 random colors
+        subject_colors = [generate_random_color() for _ in range(24)]
+        activity_markers = ['o', 's', '^', 'v', 'D', 'P', '*', '+', '8', 'h', 'x', '1']
+
     tsne = TSNE(n_components=2, random_state=42)
     X_embedding = tsne.fit_transform(X)
     # Plot the t-SNE embedded data with different colors for each subject and markers for each activity
@@ -50,10 +65,22 @@ def get_TSNE_plot(X, activities, subjects, title, save_dir=None):
         plt.savefig(os.path.join(save_dir, title + '.png'), format=image_format, dpi=1200)
     # plt.show()
 
-def get_TSNE_plot_v2(X, activities, subjects, title, save_dir=None):
+def get_TSNE_plot_v2(X, activities, subjects, title, data_name, save_dir=None):
     # Define colors and markers for subjects and activities
-    activity_colors = ['indianred', 'royalblue', 'seagreen', 'coral', 'darkmagenta', 'gold', 'cyan', 'orchid', 'burlywood', 'pink', 'chocolate', 'gray']
-    subject_markers = ['o', 's', '^', 'v', 'D', 'P', '*', '+']
+    if data_name == 'motionsense':
+        activity_colors = ['indianred', 'royalblue', 'seagreen', 'coral', 'darkmagenta', 'gold', 'cyan', 'orchid',
+                           'burlywood', 'pink', 'chocolate', 'gray']
+        subject_markers = ['o', 's', '^', 'v', 'D', 'P', '*', '+']
+    elif data_name == 'motionsense':
+        def generate_random_color():
+            r = random.randint(0, 255)
+            g = random.randint(0, 255)
+            b = random.randint(0, 255)
+            return "#{:02x}{:02x}{:02x}".format(r, g, b)
+        # Generate 24 random colors
+        activity_colors = [generate_random_color() for _ in range(24)]
+        subject_markers = ['o', 's', '^', 'v', 'D', 'P', '*', '+', '8', 'h', 'x', '1']
+
     tsne = TSNE(n_components=2, random_state=42)
     X_embedding = tsne.fit_transform(X)
     # Plot the t-SNE embedded data with different colors for each subject and markers for each activity
@@ -67,7 +94,7 @@ def get_TSNE_plot_v2(X, activities, subjects, title, save_dir=None):
     plt.title(f't-SNE Visualization with Subject and Activity Differentiation - {title}')
     plt.xlabel('t-SNE Component 1')
     plt.ylabel('t-SNE Component 2')
-    patches = get_custom_legend_patches(colors=activity_colors, labels=get_activity_names())
+    patches = get_custom_legend_patches(colors=activity_colors, labels=get_activity_names(data_name=data_name))
     plt.legend(handles=patches, title="Activities")
 
     # plt.legend()
@@ -108,7 +135,7 @@ if __name__ == "__main__":
         base_dir = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR/'
     else:
         base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
-    analysis_dir = os.path.join(base_dir, r"Logging", r"2024-02-09_18-12-52")
+    analysis_dir = os.path.join(base_dir, r"Logging", r"2024-03-02_10-38-18")
     target_subject = 2
 
     output_dir = os.path.join(analysis_dir, f"S{target_subject}", "TSNEPlots")
@@ -121,6 +148,8 @@ if __name__ == "__main__":
 
     if parameters['data_name'] == 'pamap2':
         data_dir = os.path.join(base_dir, r"PAMAP2_Dataset\PAMAP2_Dataset\Processed50Hz")
+    elif parameters['data_name'] == 'motionsense':
+        data_dir = os.path.join(base_dir, r'MotionSenseDataset/SubjectWiseData')
     else:
         data_dir = os.path.join(base_dir, r"realworld2016_dataset\Processed")
 
@@ -153,10 +182,10 @@ if __name__ == "__main__":
                           output_dim=parameters['base_net_output_dim'],
                           num_time_steps=parameters['window_size'])
     population_encoder = PopulationEncoder(input_dim=parameters['base_net_output_dim'],
-                                           hidden_1=512, output_dim=parameters['population_output_dim'],
+                                            output_dim=parameters['population_output_dim'],
                                            train_on_gpu=True)
     personalized_encoder = PersonalizedEncoder(input_dim=parameters['base_net_output_dim'],
-                                           hidden_1=512, output_dim=parameters['personalized_output_dim'],
+                                         output_dim=parameters['personalized_output_dim'],
                                            train_on_gpu=True)
     # freeze these two
     for param in base_net.parameters():
@@ -173,7 +202,7 @@ if __name__ == "__main__":
     population_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'best_population_encoder_stateDict.pth')))
     personalized_encoder.load_state_dict(torch.load(os.path.join(model_dir, 'best_personalized_encoder_stateDict.pth')))
 
-    analysis_encoder = "personalized"
+    analysis_encoder = "population"
 
     X_embedding_train = np.empty((0, parameters['population_output_dim']))
     activities_train = []
@@ -212,10 +241,10 @@ if __name__ == "__main__":
         #
         if analysis_encoder == 'population':
             get_TSNE_plot_v2(X_embedding_train, np.array(activities_train), np.array(subjects_train), f'train - {analysis_encoder}',
-                         save_dir=output_dir)
+                         data_name=parameters['data_name'], save_dir=output_dir)
         else:
             get_TSNE_plot(X_embedding_train, np.array(activities_train), np.array(subjects_train),
-                             f'train - {analysis_encoder}',
+                             f'train - {analysis_encoder}', data_name= parameters['data_name'],
                              save_dir=output_dir)
 
 
@@ -235,10 +264,10 @@ if __name__ == "__main__":
 
         if analysis_encoder == 'population':
             get_TSNE_plot_v2(X_embedding_test, np.array(activities_test), np.array(subjects_test), f'test - {analysis_encoder}',
-                         save_dir=output_dir)
+                         data_name=parameters['data_name'], save_dir=output_dir)
         else:
             get_TSNE_plot_v2(X_embedding_test, np.array(activities_test), np.array(subjects_test),
-                             f'test - {analysis_encoder}',
+                             f'test - {analysis_encoder}', data_name=parameters['data_name'],
                              save_dir=output_dir)
         plt.show()
 

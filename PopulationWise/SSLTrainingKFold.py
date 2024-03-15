@@ -13,6 +13,22 @@ import torch.nn as nn
 from info_nce import InfoNCE
 import numpy as np
 import json
+from sklearn.model_selection import KFold
+import pickle
+
+
+def get_k_folds(n_folds, num_subjects):
+    # Define your subjects
+    subjects = list(range(1, num_subjects + 1))
+    # Set the random seed for reproducibility
+    np.random.seed(42)
+    # Shuffle the subjects
+    np.random.shuffle(subjects)
+    # Initialize KFold with shuffle=False since we've already shuffled the subjects
+    kf = KFold(n_splits=n_folds, shuffle=False)
+    return kf, subjects
+
+
 
 def print_losses(train_losses, test_losses):
     # loss is dict with multiple losses
@@ -215,7 +231,7 @@ def get_encodings(x, base_net, person_enc, pop_enc):
 if __name__ == "__main__":
     warnings.filterwarnings('ignore')
     machine = 'windows'
-    include_mine = False
+    include_mine = True
     if machine == 'linux':
         BASE_DIR = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR'
     else:
@@ -229,7 +245,7 @@ if __name__ == "__main__":
         device = torch.cuda.get_device_properties(device_idx)
         print(f"CUDA Device {device_idx} - Name: {device.name}, Capability: {device.major}.{device.minor}")
 
-    timestring = strftime("%Y-%m-%d_%H-%M-%S", localtime())
+    timestring = strftime("SSL - %Y-%m-%d_%H-%M-%S", localtime())
     output_dir = os.path.join(BASE_DIR, "Logging", timestring)
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -293,14 +309,31 @@ if __name__ == "__main__":
     #                                      sliding_overlap=parameters['sliding_window_overlap_ratio'],
     #                                      num_activities=parameters['num_activities'])
 
+    kf, subjects = get_k_folds(n_folds=5, num_subjects= parameters['num_subjects'])# Loop through each fold
+    with open(os.path.join(output_dir, 'kfolds.pkl'), 'wb') as f:
+        pickle.dump(kf, f)
+    for fold_idx, (train_idx, test_idx) in enumerate(kf.split(subjects)):
+        fold_output_dir = os.path.join(output_dir, f'Fold{fold_idx}')
+        train_subjects = [subjects[i] for i in train_idx]
+        test_subjects = [subjects[i] for i in test_idx]
+        print(f"Fold {fold_idx + 1}:")
+        print("Training subjects:", train_subjects)
+        print("Testing subjects:", test_subjects)
+        # save these subject numbers
+        # Save the lists to a text file
+        with open(os.path.join(fold_output_dir, 'subjects.txt'), 'w') as file:
+            file.write("train_subjects: " + str(train_subjects) + "\n")
+            file.write("test_subjects: " + str(test_subjects) + "\n")
+        print()
+        # save kfold as well as a separate thing
+        # Save the folds to a file
 
-    for test_subject in range(1, parameters['num_subjects']+1):
-        print(f"Subject {test_subject} processing is started!")
-        subject_output_dir = os.path.join(output_dir, f'S{test_subject}')
-        if not os.path.exists(subject_output_dir):
-            os.makedirs(subject_output_dir)
-        train_loader = get_loader(parameters, test_subject, dataset_type='train')
-        test_loader = get_loader(parameters, test_subject, dataset_type='test')
+
+
+        if not os.path.exists(fold_output_dir):
+            os.makedirs(fold_output_dir)
+        train_loader = get_loader(parameters, test_subjects, dataset_type='train')
+        test_loader = get_loader(parameters, test_subjects, dataset_type='test')
 
         # load model etc.
         base_net = CNNBaseNet(input_dim=parameters['num_modalities'],
@@ -405,19 +438,18 @@ if __name__ == "__main__":
             print_losses(train_epoch_losses, test_epoch_losses)
 
             # save models
-            save_models(all_models, subject_output_dir)
+            save_models(all_models, fold_output_dir)
             for loss_name in list(train_epoch_losses.keys()):
                 plot_loss_curves(train_epoch_losses[loss_name], test_epoch_losses[loss_name],
-                                 save_loc=subject_output_dir, show_fig=False, title=loss_name)
+                                 save_loc=fold_output_dir, show_fig=False, title=loss_name)
 
             # if it has best validation loss, save that model
             if test_epoch_losses['total_loss'][-1] < best_val_loss:
                 best_val_loss = test_epoch_losses['total_loss'][-1]
-                save_best_models(all_models, save_dir=subject_output_dir)
+                save_best_models(all_models, save_dir=fold_output_dir)
                 parameters['best_epoch'] = epoch + 1
                 # Save parameter dictionary as a text file
                 with open(os.path.join(output_dir, 'parameters.txt'), 'w') as file:
                     for key, value in parameters.items():
                         file.write(f"{key}: {value}\n")
 
-            # todo: look at domain discrimination loss

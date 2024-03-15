@@ -51,8 +51,8 @@ if __name__ == "__main__":
         base_dir = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR/'
     else:
         base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
-    analysis_dir = os.path.join(base_dir, r"Logging", r"Deneme")
-    target_subject = 1
+    analysis_dir = os.path.join(base_dir, r"Logging", r"2024-03-02_10-38-18")
+    target_subject = 2
 
     # Load parameter dictionary from the text file
     parameters = read_params_dict(analysis_dir)
@@ -61,6 +61,8 @@ if __name__ == "__main__":
 
     if parameters['data_name'] == 'pamap2':
         data_dir = os.path.join(base_dir, r"PAMAP2_Dataset\PAMAP2_Dataset\Processed50Hz")
+    elif parameters['data_name'] == 'motionsense':
+        data_dir = os.path.join(base_dir, r'MotionSenseDataset/SubjectWiseData')
     else:
         data_dir = os.path.join(base_dir, r"realworld2016_dataset\Processed")
 

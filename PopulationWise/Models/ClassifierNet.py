@@ -9,7 +9,7 @@ class ClassifierNet(nn.Module):
         self.fc = nn.Sequential(nn.Linear(input_dim, hidden_1),
                                 nn.BatchNorm1d(hidden_1),
                                 nn.ReLU(),
-                                nn.Dropout(0.75),
+                                nn.Dropout(0.5),
                                 nn.Linear(hidden_1, output_dim))
         self.train_on_gpu = train_on_gpu
 

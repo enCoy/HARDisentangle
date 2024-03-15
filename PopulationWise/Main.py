@@ -22,10 +22,13 @@ from sklearn.manifold import TSNE
 import matplotlib.patches as mpatches
 
 
-def get_activity_names():
-    return ['lying', 'sitting', 'standing', 'walking', 'running', 'cycling',
+def get_activity_names(data_name):
+    if data_name == 'pamap2':
+        return ['lying', 'sitting', 'standing', 'walking', 'running', 'cycling',
                 'nordic walking', 'ascending stairs', 'descending stairs', 'vacuum cleaning',
                 'ironing', 'rope jumping']
+    elif data_name =='motionsense':
+        return ['dws', 'ups', 'sit', 'std', 'wlk', 'jog']
 
 def get_custom_legend_patches(colors, labels):
     patches = []
@@ -33,7 +36,7 @@ def get_custom_legend_patches(colors, labels):
         patches.append(mpatches.Patch(color=colors[j], label=labels[j]))
     return patches
 
-def get_TSNE_plot_error_amplified(X, is_error_data, activities, subjects, title, save_dir=None):
+def get_TSNE_plot_error_amplified(X, is_error_data, activities, subjects, title, data_name, save_dir=None):
     # Define colors and markers for subjects and activities
     # errors is a binary array - if it is 1, prediction is correct, if it is 0 it is wrong
 
@@ -58,7 +61,7 @@ def get_TSNE_plot_error_amplified(X, is_error_data, activities, subjects, title,
     plt.title(f't-SNE Visualization with Subject and Activity Differentiation - {title}')
     plt.xlabel('t-SNE Component 1')
     plt.ylabel('t-SNE Component 2')
-    patches = get_custom_legend_patches(colors=activity_colors, labels=get_activity_names())
+    patches = get_custom_legend_patches(colors=activity_colors, labels=get_activity_names(data_name=data_name))
     plt.legend(handles=patches, title="Activities")
 
     # plt.legend()
@@ -92,23 +95,45 @@ def read_params_dict(analysis_dir):
     # Print the loaded parameter dictionary
     return parameters
 
-
+import random
 if __name__ == "__main__":
+    # Set the seed for random number generation in Python
+    seed_value = 42
+    random.seed(seed_value)
+    np.random.seed(seed_value)
+
+    # Set the seed for PyTorch
+    torch.manual_seed(seed_value)
+    torch.cuda.manual_seed(seed_value)
+    torch.cuda.manual_seed_all(seed_value)  # if using multi-GPU
+
+    # Ensures that operations are deterministic on GPU (if used)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
     machine = 'windows'
     if machine == 'linux':
         base_dir = r'/home/cmyldz/Dropbox (GaTech)/DisentangledHAR/'
     else:
         base_dir = r'C:\Users\Cem Okan\Dropbox (GaTech)\DisentangledHAR/'
-    analysis_dir = os.path.join(base_dir, r"Logging", r"Deneme")
-    target_subject = 1
-    include_personalized = False
+    analysis_dir = os.path.join(base_dir, r"Logging", "Experiment Set", r"OldWayOfPersonalized")
+    # subject 1 - 0.79
+    # subject 2 3 6 12- 0.95
+    # subject 4, 7, 9, 13 - 0.85
+    # subject 8 - 0.93
+    # subject 10 - 0.81
+    # subject 11 - 0.89
+    # average across these gives 0.89
+    target_subject = 2
+    include_personalized = True
 
     # Load parameter dictionary from the text file
     parameters = read_params_dict(analysis_dir)
     print("parameters: ", parameters)
-
     if parameters['data_name'] == 'pamap2':
         data_dir = os.path.join(base_dir, r"PAMAP2_Dataset\PAMAP2_Dataset\Processed50Hz")
+    elif parameters['data_name'] == 'motionsense':
+        data_dir = os.path.join(base_dir, r'MotionSenseDataset/SubjectWiseData')
     else:
         data_dir = os.path.join(base_dir, r"realworld2016_dataset\Processed")
 
@@ -127,10 +152,10 @@ if __name__ == "__main__":
     train_X, train_y, test_X, test_y = convert_to_torch(train_X, train_y, test_X, test_y)
 
     trainset = Data.TensorDataset(train_X, train_y)
-    trainloader = Data.DataLoader(dataset=trainset, batch_size=64,
+    trainloader = Data.DataLoader(dataset=trainset, batch_size=32,
                                   shuffle=True, num_workers=0, drop_last=True)
     testset = Data.TensorDataset(test_X, test_y)
-    testloader = Data.DataLoader(dataset=testset, batch_size=64,
+    testloader = Data.DataLoader(dataset=testset, batch_size=32,
                                  shuffle=False, num_workers=0, drop_last=True)
 
     model_dir = os.path.join(analysis_dir, f"S{target_subject}")
@@ -140,10 +165,10 @@ if __name__ == "__main__":
                           output_dim=parameters['base_net_output_dim'],
                           num_time_steps=parameters['window_size'])
     population_encoder = PopulationEncoder(input_dim=parameters['base_net_output_dim'],
-                                           hidden_1=256, output_dim=parameters['population_output_dim'], # was 128
+                                            output_dim=parameters['population_output_dim'], # was 128
                                            train_on_gpu=True)
     personalized_encoder = PersonalizedEncoder(input_dim=parameters['base_net_output_dim'],
-                                       hidden_1=256, output_dim=parameters['personalized_output_dim'], # was 128
+                                        output_dim=parameters['personalized_output_dim'], # was 128
                                        train_on_gpu=True)
     # freeze these two
     for param in base_net.parameters():
@@ -176,7 +201,6 @@ if __name__ == "__main__":
         'population_encoder': population_encoder,
         'personalized_encoder':personalized_encoder,
         'classifier': classification_net,
-
     }
 
     all_models_names = list(all_models.keys())
@@ -189,10 +213,10 @@ if __name__ == "__main__":
     # Define your loss function
     criterion = nn.CrossEntropyLoss()
     # Define your optimizer
-    optimizer = optim.SGD((list(classification_net.parameters()) + list(base_net.parameters()) + list(population_encoder.parameters())),
-                                 lr=0.00001, weight_decay=1e-4, momentum=0.9)
+    optimizer = optim.Adam((list(classification_net.parameters()) + list(base_net.parameters()) + list(population_encoder.parameters())),
+                                 lr=0.00003, weight_decay=1e-5)
     # Define number of epochs
-    num_epochs = 100
+    num_epochs = 20
     best_train_preds = None
     best_train_gt = None
     best_test_preds = None
@@ -371,11 +395,11 @@ if __name__ == "__main__":
 
             if analysis_encoder == 'population':
                 get_TSNE_plot_error_amplified(X_embedding_test, is_error_data, np.array(activities_test), np.array(subjects_test)[:len(is_error_data)],
-                                 f'test - {analysis_encoder}',
+                                 f'test - {analysis_encoder}', data_name=parameters['data_name'],
                                  save_dir=os.path.join(analysis_dir, f'S{target_subject}', "TSNEPlotsErrorAmplified"))
             else:
                 get_TSNE_plot_error_amplified(X_embedding_test, is_error_data, np.array(activities_test), np.array(subjects_test)[:len(is_error_data)],
-                                 f'test - {analysis_encoder}',
+                                 f'test - {analysis_encoder}', data_name=parameters['data_name'],
                                  save_dir=os.path.join(analysis_dir, f'S{target_subject}', "TSNEPlotsErrorAmplified"))
         plt.show()
 
